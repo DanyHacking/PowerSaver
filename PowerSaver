@@ -1,0 +1,28 @@
+from tkinter import *
+
+root = Tk()
+
+# Definiramo velikost okna in barvo ozadja
+root.geometry("800x600")
+root.configure(bg="#FFFFFF")
+
+# Definiramo sliko in logotip
+img = PhotoImage(file="path/to/image.png")
+logo = PhotoImage(file="path/to/logo.png")
+
+# Definiramo krog, ki predstavlja planet Zemljo in hišo v notranjosti
+canvas = Canvas(root, width=500, height=500, bg="#FFFFFF", highlightthickness=0)
+canvas.create_oval(50, 50, 450, 450, fill="#1A4341", outline="#1A4341")
+canvas.create_image(250, 250, image=img)
+canvas.create_image(250, 70, image=logo)
+
+# Dodamo napis "PowerSaver" in "Skrbimo za naš planet"
+canvas.create_text(250, 350, text="PowerSaver", font=("Helvetica", 30, "bold"), fill="#FFFFFF")
+canvas.create_text(250, 400, text="Skrbimo za naš planet", font=("Helvetica", 12), fill="#FFFFFF")
+
+# Dodamo gumbe za upravljanje s porabo energije in dostop do drugih funkcij aplikacije
+calculate_button = Button(root, text="Izračunaj prihranek energije", font=("Helvetica", 10), command=calculate)
+calculate_button.pack(side="bottom")
+
+canvas.pack()
+root.mainloop()
