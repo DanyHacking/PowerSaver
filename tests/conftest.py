@@ -7,7 +7,12 @@ import os
 import json
 from pathlib import Path
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+
+# Handle web3 middleware import based on version
+try:
+    from web3.middleware import geth_poa_middleware
+except ImportError:
+    geth_middleware = None
 
 
 @pytest.fixture(scope="session")
@@ -20,7 +25,11 @@ def rpc_url():
 def w3(rpc_url):
     """Web3 instance for production"""
     w3 = Web3(Web3.HTTPProvider(rpc_url))
-    w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    if geth_middleware:
+        try:
+            w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        except Exception:
+            pass
     return w3
 
 
@@ -87,3 +96,9 @@ def risk_manager_config():
         "take_profit_percentage": 10,
         "max_drawdown_percentage": 15
     }
+
+
+@pytest.fixture(scope="session")
+def local_rpc_url():
+    """Local RPC URL for testing"""
+    return os.getenv("LOCAL_RPC_URL", "http://localhost:8545")

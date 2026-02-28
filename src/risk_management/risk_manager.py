@@ -218,6 +218,19 @@ class RiskManager:
         """Manually disable trading"""
         self.is_trading_allowed = False
         logger.warning(f"Trading disabled: {reason}")
+    
+    def check_trading_allowed(self) -> tuple[bool, str]:
+        """Check if trading is currently allowed"""
+        if not self.is_trading_allowed:
+            return False, "Trading disabled"
+        
+        if self.daily_loss >= self.max_daily_loss:
+            return False, f"Daily loss limit reached: ${self.daily_loss:.2f}"
+        
+        if len(self.active_positions) >= self.max_concurrent_trades:
+            return False, f"Max concurrent trades ({self.max_concurrent_trades}) reached"
+        
+        return True, "Trading allowed"
 
 
 class ProfitTracker:

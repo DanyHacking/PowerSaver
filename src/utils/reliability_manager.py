@@ -99,6 +99,21 @@ class HealthMonitor:
         
         return overall_health
     
+    def get_health(self) -> str:
+        """Get current health status as string"""
+        if not self.health_checks:
+            return "unknown"
+        
+        critical_count = sum(1 for c in self.health_checks if c.status == "critical")
+        degraded_count = sum(1 for c in self.health_checks if c.status == "degraded")
+        
+        if critical_count > 0:
+            return "critical"
+        elif degraded_count > 2:
+            return "degraded"
+        else:
+            return "healthy"
+    
     async def _check_cpu(self) -> HealthCheck:
         start = time.time()
         usage = self._get_cpu_usage()

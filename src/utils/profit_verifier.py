@@ -48,11 +48,12 @@ class TradeValidation:
 class RealTimeProfitCalculator:
     """Real-time profit calculation with multiple verification layers"""
     
-    def __init__(self):
+    def __init__(self, blockchain_data=None):
         self.price_cache: Dict[str, float] = {}
         self.cache_ttl = 5  # seconds
         self.gas_price_cache = 0.0
         self.last_gas_update = 0.0
+        self.blockchain_data = blockchain_data
     
     async def calculate_estimated_profit(
         self,
@@ -66,9 +67,28 @@ class RealTimeProfitCalculator:
         """Calculate estimated profit with all costs"""
         start_time = time.time()
         
-        # Get current prices
-        price_in = await self._get_token_price(token_in)
-        price_out = await self._get_token_price(token_out)
+        # Get current prices from real data source or fallback
+        if self.blockchain_data:
+            try:
+                price_data = await self.blockchain_data.get_token_price(token_in)
+                if price_data:
+                    price_in = price_data.price_usd
+                else:
+                    price_in = await self._get_token_price(token_in)
+                
+                price_out_data = await self.blockchain_data.get_token_price(token_out)
+                if price_out_data:
+                    price_out = price_out_data.price_usd
+                else:
+                    price_out = await self._get_token_price(token_out)
+            except Exception:
+                # Fallback to simulated if blockchain data fails
+                price_in = await self._get_token_price(token_in)
+                price_out = await self._get_token_price(token_out)
+        else:
+            # Use fallback calculation
+            price_in = await self._get_token_price(token_in)
+            price_out = await self._get_token_price(token_out)
         
         # Calculate gross profit from arbitrage
         gross_profit = await self._calculate_arbitrage_profit(

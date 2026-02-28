@@ -1,14 +1,94 @@
 {
-  "aave_pool": "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
-  "tokens": ["ETH", "USDC", "DAI", "WBTC"],
-  "exchanges": ["uniswap_v2", "uniswap_v3", "sushiswap", "balancer"],
-  "loan_amount": 10000,
-  "max_loan_amount": 100000,
-  "max_daily_loss": 10000,
-  "max_position_size": 50000,
-  "min_profit_threshold": 0.005,
-  "max_concurrent_trades": 3,
-  "monitoring_interval": 5,
+  "aave_pool": "0x87870Bca3F3fD6335C3F4ce6260135144110A857",
+  "tokens": [
+    "ETH", "WETH", "USDC", "USDT", "DAI", "WBTC", "WBTc", "LINK",
+    "MATIC", "UNI", "AAVE", "CRV", "SUSHI", "SNX", "COMP", "MKR",
+    "BAT", "ZRX", "ENJ", "MANA", "SAND", "AXS", "APE", "LDO",
+    "OP", "ARB", "SHIB", "PEPE", "USDP", "FRAX", "FEI", "TRIBE",
+    "USDD", "BUSD", "TUSD", "PAXG", "RETH", "STETH", "CETH", "CBETH",
+    "GMX", "LDO", "RNDR", "IMX", "GALA", "ENS", "1INCH", "CRO", "FTM"
+  ],
+  "exchanges": [
+    "uniswap_v2", "uniswap_v3", "sushiswap", "balancer", "curve",
+    "dodo", "pancakeswap", "trader_joe", "spirit_swap", "ape_swap",
+    "biswap", "mdex", "elk", "snowball", "lynex", "velodrome", "swapr",
+    "gmx", "rdpx", "camelot", "dystopia", "barter"
+  ],
+  "loan_amount": 75000,
+  "max_loan_amount": 750000,
+  "max_daily_loss": 75000,
+  "max_position_size": 375000,
+  "min_profit_threshold": 200,
+  "max_concurrent_trades": 15,
+  "monitoring_interval": 1,
   "enable_alerts": true,
-  "log_level": "INFO"
+  "log_level": "INFO",
+  "scan_interval_seconds": 0.5,
+  "max_slippage": 0.015,
+  "gas_limit_multiplier": 1.3,
+  "opportunity_timeout_seconds": 15,
+  "retry_attempts": 5,
+  "min_liquidity_usd": 5000,
+  "price_refresh_interval": 0.5,
+  
+  "mev_settings": {
+    "enabled": true,
+    "private_transactions": true,
+    "bundle_submission": true,
+    "use_flashbots": true,
+    "flashbots_relay": "https://relay.flashbots.net",
+    "min_liquidation_reward": 50,
+    "max_gas_price": 150,
+    "liquidations_enabled": true,
+    "sandwich_protection": true,
+    "backrun_enabled": true,
+    "frontrun_enabled": true
+  },
+  
+  "execution_settings": {
+    "priority_gas_multiplier": 1.2,
+    "max_priority_fee": 3,
+    "fast_mode": true,
+    "parallel_execution": true,
+    "simulation_before_trade": true,
+    "slippage_tolerance": 0.015,
+    " deadline_seconds": 60
+  },
+  
+  "aggressive_settings": {
+    "enabled": true,
+    "min_profit_per_trade": 200,
+    "max_daily_trades": 100,
+    "aggressive_scanning": true,
+    "cross_exchange_arbitrage": true,
+    "triangular_arbitrage": true,
+    "cyclical_arbitrage": true,
+    "flash_loan_leverage": 10,
+    "compounding_enabled": true,
+    "reinvest_profits": true,
+    "trailing_stop": true,
+    "trailing_stop_percentage": 2,
+    "partial_take_profit": true,
+    "partial_levels": [1, 2, 3, 5],
+    "momentum_trading": true,
+    "mean_reversion": true,
+    "breakout_trading": true,
+    "volatility_capture": true,
+    "correlation_trading": true,
+    "statistical_arbitrage": true,
+    "machine_learning_predictions": true,
+    "ai_strategy_selection": true
+  },
+  
+  "risk_controls": {
+    "max_slippage_per_trade": 1.5,
+    "max_daily_loss": 75000,
+    "max_position_per_trade": 375000,
+    "stop_loss_percentage": 3,
+    "take_profit_percentage": 10,
+    "max_leverage": 10,
+    "emergency_stop_percentage": 5,
+    "circuit_breaker": true,
+    "circuit_breaker_threshold": 10000
+  }
 }
