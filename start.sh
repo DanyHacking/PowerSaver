@@ -117,6 +117,96 @@ load_environment() {
     log_info "  - Trading Wallet: ${TRADING_WALLET_ADDRESS:-configured}"
 }
 
+# Install Ethereum node (optional - you can also use Infura/Alchemy)
+install_ethereum_node() {
+    log_section "Setting Up Ethereum Node"
+    
+    # Check if already running geth/erigon
+    if pgrep -x "geth" > /dev/null || pgrep -x "erigon" > /dev/null; then
+        log_success "Ethereum node is already running"
+        return 0
+    fi
+    
+    # Option 1: Use external RPC (Infura/Alchemy) - RECOMMENDED
+    if [ -n "$ETHEREUM_RPC_URL" ] && [[ "$ETHEREUM_RPC_URL" == *"infura"* ]] || [[ "$ETHEREUM_RPC_URL" == *"alchemy"* ]]; then
+        log_info "Using external RPC provider (recommended)"
+        log_info "  Provider: $(echo $ETHEREUM_RPC_URL | sed 's|https://||' | cut -d'.' -f1)"
+        return 0
+    fi
+    
+    # Option 2: Install local node (Erigon - fastest, or Geth)
+    log_warning "No external RPC detected."
+    
+    # Install Erigon (faster than Geth, less disk space)
+    log_info "Installing Erigon (fastest Ethereum client)..."
+    
+    if command -v erigon &>/dev/null; then
+        log_success "Erigon already installed"
+    else
+        # Download Erigon
+        ETHEREUM_VERSION="v2.59.0"
+        ARCH=$(uname -m)
+        
+        if [ "$ARCH" = "x86_64" ]; then
+            ARCH="amd64"
+        elif [ "$ARCH" = "aarch64" ]; then
+            ARCH="arm64"
+        fi
+        
+        # Download pre-built binary
+        cd /tmp
+        curl -fsSL "https://github.com/ledgerwatch/erigon/releases/download/${ETHEREUM_VERSION}/erigon-${ETHEREUM_VERSION}-linux-${ARCH}.tar.gz" -o erigon.tar.gz
+        
+        if [ -f erigon.tar.gz ]; then
+            sudo tar -xzf erigon.tar.gz -C /usr/local/bin --overwrite
+            rm erigon.tar.gz
+            log_success "Erigon installed"
+        else
+            # Fallback to geth
+            log_warning "Erigon download failed, installing Geth instead..."
+            install_geth
+            return 0
+        fi
+    fi
+    
+    # Create data directory
+    mkdir -p "${DATA_DIR}/erigon"
+    
+    log_info "To run Erigon manually:"
+    log_info "  erigon --chain mainnet --datadir ${DATA_DIR}/erigon --http --http.api eth,net,erigon --ws"
+    log_info "  or for fast sync:"
+    log_info "  erigon --chain mainnet --datadir ${DATA_DIR}/erigon --http --http.api eth,net,erigon --torrent.upload.rate 50mb"
+    
+    log_warning "For production, we recommend using external RPC (Infura/Alchemy)"
+}
+
+install_geth() {
+    # Install geth (Gthereum client)
+    if command -v geth &>/dev/null; then
+        log_success "Geth is already installed"
+        return
+    fi
+    
+    log_info "Installing geth..."
+    
+    # Ubuntu/Debian
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common
+        sudo add-apt-repository -y ppa:ethereum/ethereum
+        sudo apt-get update
+        sudo apt-get install -y ethereum
+    # CentOS/RHEL
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y epel-release
+        sudo yum install -y geth
+    fi
+    
+    log_success "Geth installed"
+    
+    mkdir -p "${DATA_DIR}/geth"
+}
+
 # Verify mainnet connectivity
 verify_mainnet_connectivity() {
     log_section "Verifying Mainnet Connectivity"
@@ -364,6 +454,7 @@ main() {
     check_prerequisites
     setup_directories
     load_environment
+    install_ethereum_node
     verify_mainnet_connectivity
     deploy_contracts
     configure_trading_engine
