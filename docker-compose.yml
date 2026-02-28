@@ -1,0 +1,217 @@
+version: '3.8'
+
+services:
+  # ======================== TRADING ENGINE ========================
+  trading-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: flash-loan-trader:latest
+    container_name: flash-loan-trader
+    restart: unless-stopped
+    environment:
+      - BLOCKCHAIN_NETWORK=${BLOCKCHAIN_NETWORK:-ethereum}
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
+      - POLYGON_RPC_URL=${POLYGON_RPC_URL}
+      - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL}
+      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL}
+      - TRADING_WALLET_PRIVATE_KEY=${TRADING_WALLET_PRIVATE_KEY}
+      - TRADING_WALLET_ADDRESS=${TRADING_WALLET_ADDRESS}
+      - AAVE_V3_POOL_ADDRESS=${AAVE_V3_POOL_ADDRESS}
+      - UNISWAP_V2_FACTORY_ADDRESS=${UNISWAP_V2_FACTORY_ADDRESS}
+      - UNISWAP_V3_FACTORY_ADDRESS=${UNISWAP_V3_FACTORY_ADDRESS}
+      - SUSHISWAP_FACTORY_ADDRESS=${SUSHISWAP_FACTORY_ADDRESS}
+      - BALANCER_V2_VAULT_ADDRESS=${BALANCER_V2_VAULT_ADDRESS}
+      - WETH_ADDRESS=${WETH_ADDRESS}
+      - USDC_ADDRESS=${USDC_ADDRESS}
+      - DAI_ADDRESS=${DAI_ADDRESS}
+      - WBTC_ADDRESS=${WBTC_ADDRESS}
+      - LOAN_AMOUNT_USD=${LOAN_AMOUNT_USD:-10000}
+      - MAX_LOAN_AMOUNT_USD=${MAX_LOAN_AMOUNT_USD:-100000}
+      - MAX_POSITION_SIZE_USD=${MAX_POSITION_SIZE_USD:-50000}
+      - MIN_PROFIT_THRESHOLD_USD=${MIN_PROFIT_THRESHOLD_USD:-500}
+      - MAX_CONCURRENT_TRADES=${MAX_CONCURRENT_TRADES:-3}
+      - TRADING_STRATEGY=${TRADING_STRATEGY:-balanced}
+      - SUPPORTED_TOKENS=${SUPPORTED_TOKENS:-ETH,USDC,DAI,WBTC}
+      - SUPPORTED_EXCHANGES=${SUPPORTED_EXCHANGES:-uniswap_v2,uniswap_v3,sushiswap,balancer}
+      - MAX_DAILY_LOSS_USD=${MAX_DAILY_LOSS_USD:-10000}
+      - MAX_LOSS_PER_TRADE_USD=${MAX_LOSS_PER_TRADE_USD:-1000}
+      - STOP_LOSS_PERCENTAGE=${STOP_LOSS_PERCENTAGE:-5}
+      - TAKE_PROFIT_PERCENTAGE=${TAKE_PROFIT_PERCENTAGE:-10}
+      - MAX_DRAWDOWN_PERCENTAGE=${MAX_DRAWDOWN_PERCENTAGE:-15}
+      - MAX_ERRORS_BEFORE_STOP=${MAX_ERRORS_BEFORE_STOP:-10}
+      - ERROR_TIME_WINDOW_SECONDS=${ERROR_TIME_WINDOW_SECONDS:-3600}
+      - ENABLE_EMAIL_ALERTS=${ENABLE_EMAIL_ALERTS:-false}
+      - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
+      - COINGECKO_API_KEY=${COINGECKO_API_KEY}
+      - INFURA_API_KEY=${INFURA_API_KEY}
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MONITORING_INTERVAL_SECONDS=${MONITORING_INTERVAL_SECONDS:-30}
+      - HEALTH_CHECK_INTERVAL_SECONDS=${HEALTH_CHECK_INTERVAL_SECONDS:-10}
+      - RECOVERY_COOLDOWN_SECONDS=${RECOVERY_COOLDOWN_SECONDS:-300}
+      - MAX_RETRIES_BEFORE_STOP=${MAX_RETRIES_BEFORE_STOP:-3}
+      - GAS_OPTIMIZATION_ENABLED=${GAS_OPTIMIZATION_ENABLED:-true}
+      - AI_PREDICTIONS_ENABLED=${AI_PREDICTIONS_ENABLED:-true}
+      - PORTFOLIO_REBALANCING_ENABLED=${PORTFOLIO_REBALANCING_ENABLED:-true}
+      - TEST_MODE=${TEST_MODE:-false}
+      - SIMULATE_TRADES=${SIMULATE_TRADES:-true}
+      - SIMULATION_CONFIDENCE=${SIMULATION_CONFIDENCE:-0.8}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    ports:
+      - "8000:8000"
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # ======================== MONITORING ========================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - trading-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    networks:
+      - trading-network
+    depends_on:
+      - prometheus
+
+  # ======================== LOGGING ========================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: logstash
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/logstash/pipeline.conf:/usr/share/logstash/pipeline/logstash.conf
+    depends_on:
+      - elasticsearch
+    networks:
+      - trading-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - trading-network
+
+  # ======================== DATABASE ========================
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=flash_loan_trader
+      - POSTGRES_USER=trader
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-trader_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ======================== REDIS ========================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - trading-network
+    command: redis-server --appendonly yes
+
+networks:
+  trading-network:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+  postgres_data:
+  redis_data:

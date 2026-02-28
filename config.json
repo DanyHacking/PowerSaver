@@ -1,0 +1,14 @@
+{
+  "aave_pool": "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
+  "tokens": ["ETH", "USDC", "DAI", "WBTC"],
+  "exchanges": ["uniswap_v2", "uniswap_v3", "sushiswap", "balancer"],
+  "loan_amount": 10000,
+  "max_loan_amount": 100000,
+  "max_daily_loss": 10000,
+  "max_position_size": 50000,
+  "min_profit_threshold": 0.005,
+  "max_concurrent_trades": 3,
+  "monitoring_interval": 5,
+  "enable_alerts": true,
+  "log_level": "INFO"
+}
