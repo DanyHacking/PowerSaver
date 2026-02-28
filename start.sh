@@ -117,27 +117,114 @@ load_environment() {
     log_info "  - Trading Wallet: ${TRADING_WALLET_ADDRESS:-configured}"
 }
 
-# Install Ethereum node (Erigon by default - fastest for bots)
+# Install Ethereum node (Reth - fastest & lightest for bots)
 install_ethereum_node() {
     log_section "Setting Up Ethereum Node"
     
-    # Check if already running geth/erigon
-    if pgrep -x "geth" > /dev/null || pgrep -x "erigon" > /dev/null; then
+    # Check if already running
+    if pgrep -x "geth" > /dev/null || pgrep -x "erigon" > /dev/null || pgrep -x "reth" > /dev/null; then
         log_success "Ethereum node is already running"
-        return 0
-    fi
-    
-    # Always install Erigon for maximum performance (unless explicitly disabled)
-    if [ "$USE_LOCAL_NODE" = "false" ] || [ "$USE_LOCAL_NODE" = "0" ]; then
-        log_info "Using external RPC as configured"
-        if [ -n "$ETHEREUM_RPC_URL" ]; then
-            log_info "  RPC: ${ETHEREUM_RPC_URL}"
+        
+        # Update RPC to local if node is running
+        if pgrep -x "reth" > /dev/null; then
+            export ETHEREUM_RPC_URL="http://localhost:8545"
+            log_info "Using local Reth RPC: http://localhost:8545"
         fi
         return 0
     fi
     
-    # Install Erigon (fastest Ethereum client for bots)
-    log_info "Installing Erigon node (optimized for trading bots)..."
+    # Check if user wants local node (default: true for bots)
+    if [ "$USE_LOCAL_NODE" = "false" ] || [ "$USE_LOCAL_NODE" = "0" ]; then
+        log_info "Using external RPC: $ETHEREUM_RPC_URL"
+        return 0
+    fi
+    
+    if command -v reth &>/dev/null; then
+        log_success "Reth already installed"
+    else
+        # Download Reth binary (recommended)
+        log_info "Downloading Reth..."
+        
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "x86_64" ]; then
+            ARCH="x86_64"
+        elif [ "$ARCH" = "aarch64" ]; then
+            ARCH="aarch64"
+        fi
+        
+        RETH_VERSION="v0.2.0"
+        
+        cd /tmp
+        curl -fsSL "https://github.com/paradigmxyz/reth/releases/download/${RETH_VERSION}/reth-${RETH_VERSION}-${ARCH}-unknown-linux-gnu.tar.gz" -o reth.tar.gz
+        
+        if [ -f reth.tar.gz ]; then
+            sudo tar -xzf reth.tar.gz -C /usr/local/bin --overwrite
+            rm reth.tar.gz
+            log_success "Reth installed successfully"
+        else
+            log_warning "Reth download failed, trying Erigon..."
+            install_erigon
+            return 0
+        fi
+    fi
+    
+    # Create data directory
+    mkdir -p "${DATA_DIR}/reth"
+    
+    log_success "Reth installed!"
+    log_info ""
+    log_info "🚀 STARTING LIGHT NODE FOR BOTS:"
+    log_info "==========================="
+    log_info "  # Light node (fastest - ~1GB, ready in minutes):"
+    log_info "  reth node \\"
+    log_info "    --chain mainnet \\"
+    log_info "    --datadir ${DATA_DIR}/reth \\"
+    log_info "    --http \\"
+    log_info "    --http.api eth,net,debug,trace \\"
+    log_info "    --http.vhosts=* \\"
+    log_info "    --light"
+    log_info ""
+    log_info "  # Full node (more data, better for history queries):"
+    log_info "  reth node \\"
+    log_info "    --chain mainnet \\"
+    log_info "    --datadir ${DATA_DIR}/reth \\"
+    log_info "    --http \\"
+    log_info "    --http.api eth,net,debug,trace \\"
+    log_info "    --prune.timestamps.0"
+    log_info ""
+    log_info "  # Or just run with defaults:"
+    log_info "  reth node --chain mainnet --datadir ${DATA_DIR}/reth --http"
+    log_info ""
+    
+    # Auto-start light node for bot
+    log_info "Starting light node in background..."
+    nohup reth node \
+        --chain mainnet \
+        --datadir "${DATA_DIR}/reth" \
+        --http \
+        --http.api eth,net,debug,trace \
+        --http.vhosts=* \
+        --http.corsdomain=* \
+        --light \
+        > "${LOG_DIR}/reth.log" 2>&1 &
+    
+    RETH_PID=$!
+    echo $RETH_PID > "${DATA_DIR}/reth.pid"
+    
+    log_success "Reth light node started (PID: $RETH_PID)"
+    
+    # Wait for sync
+    log_info "Waiting for node to sync..."
+    sleep 5
+    
+    # Update RPC to local
+    export ETHEREUM_RPC_URL="http://localhost:8545"
+    log_success "Local RPC ready: http://localhost:8545"
+}
+
+install_erigon() {
+    # Fallback to Erigon
+    log_info "Installing Erigon as fallback..."
     
     if command -v erigon &>/dev/null; then
         log_success "Erigon already installed"
