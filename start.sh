@@ -172,10 +172,10 @@ deploy_contracts() {
     
     log_info "Deploying FlashLoanExecutor to mainnet..."
     
-    local DEPLOYER_KEY="${DEPLOYER_PRIVATE_KEY}"
+    local DEPLOYER_KEY="${TRADING_WALLET_PRIVATE_KEY}"
     
     if [ -z "$DEPLOYER_KEY" ]; then
-        log_error "DEPLOYER_PRIVATE_KEY not configured"
+        log_error "TRADING_WALLET_PRIVATE_KEY not configured"
         exit 1
     fi
     
@@ -211,32 +211,44 @@ configure_trading_engine() {
         "chain_id": ${CHAIN_ID:-1},
         "confirmations": 1,
         "gas_price_gwei": ${GAS_PRICE_GWEI:-30},
-        "max_gas_price_gwei": ${MAX_GAS_PRICE_GWEI:-100}
+        "max_gas_price_gwei": ${MAX_GAS_PRICE_GWEI:-150}
     },
     "trading": {
-        "loan_amount_usd": ${LOAN_AMOUNT_USD:-10000},
-        "max_loan_amount_usd": ${MAX_LOAN_AMOUNT_USD:-100000},
-        "max_position_size_usd": ${MAX_POSITION_SIZE_USD:-50000},
-        "min_profit_threshold_usd": ${MIN_PROFIT_THRESHOLD_USD:-500},
-        "max_concurrent_trades": ${MAX_CONCURRENT_TRADES:-3},
-        "strategy": "${TRADING_STRATEGY:-balanced}",
+        "loan_amount_usd": ${LOAN_AMOUNT_USD:-75000},
+        "max_loan_amount_usd": ${MAX_LOAN_AMOUNT_USD:-750000},
+        "max_position_size_usd": ${MAX_POSITION_SIZE_USD:-375000},
+        "min_profit_threshold_usd": ${MIN_PROFIT_THRESHOLD_USD:-200},
+        "max_concurrent_trades": ${MAX_CONCURRENT_TRADES:-15},
+        "strategy": "${TRADING_STRATEGY:-aggressive}",
         "test_mode": false,
         "simulate_trades": false,
         "auto_execute": true,
-        "trading_enabled": true
+        "trading_enabled": true,
+        "scan_interval_seconds": 1,
+        "max_daily_trades": 100
     },
     "risk_management": {
-        "max_daily_loss_usd": ${MAX_DAILY_LOSS_USD:-10000},
+        "max_daily_loss_usd": ${MAX_DAILY_LOSS_USD:-75000},
         "max_loss_per_trade_usd": ${MAX_LOSS_PER_TRADE_USD:-1000},
-        "stop_loss_percentage": ${STOP_LOSS_PERCENTAGE:-5},
+        "stop_loss_percentage": ${STOP_LOSS_PERCENTAGE:-3},
         "take_profit_percentage": ${TAKE_PROFIT_PERCENTAGE:-10},
         "max_drawdown_percentage": ${MAX_DRAWDOWN_PERCENTAGE:-15},
-        "max_daily_trades": ${MAX_DAILY_TRADES:-50},
-        "cooldown_period_seconds": ${COOLDOWN_PERIOD_SECONDS:-300}
+        "max_daily_trades": ${MAX_DAILY_TRADES:-100},
+        "cooldown_period_seconds": ${COOLDOWN_PERIOD_SECONDS:-60}
+    },
+    "mev": {
+        "enabled": true,
+        "private_transactions": true,
+        "bundle_submission": true,
+        "use_flashbots": true,
+        "liquidations_enabled": true,
+        "sandwich_enabled": true,
+        "min_liquidation_reward": 50,
+        "max_gas_price": 150
     },
     "monitoring": {
-        "health_check_interval_seconds": 60,
-        "metrics_collection_interval_seconds": 300,
+        "health_check_interval_seconds": 30,
+        "metrics_collection_interval_seconds": 60,
         "alert_thresholds": {
             "cpu_percent": 80,
             "memory_percent": 85,
@@ -247,8 +259,8 @@ configure_trading_engine() {
         "provider": "${FLASH_LOAN_PROVIDER:-aave_v3}",
         "pool_address": "${AAVE_V3_POOL_ADDRESS}",
         "max_loan_duration_seconds": 120,
-        "retry_attempts": 3,
-        "retry_delay_seconds": 5
+        "retry_attempts": 5,
+        "retry_delay_seconds": 2
     },
     "wallet": {
         "address": "${TRADING_WALLET_ADDRESS}",
@@ -257,7 +269,7 @@ configure_trading_engine() {
 }
 CONFIG_EOF
     
-    log_success "Trading engine configured for production"
+    log_success "Trading engine configured for PRODUCTION"
 }
 
 # Start trading engine
