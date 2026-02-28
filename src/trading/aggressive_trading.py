@@ -46,19 +46,77 @@ class TradingStrategy(Enum):
 
 @dataclass
 class TradeSignal:
-    """Trading signal with entry/exit points"""
+    """Trading signal with COMPLETE swap data"""
+    # Strategy
     strategy: TradingStrategy
-    token_in: str
-    token_out: str
-    amount: float
-    expected_profit: float
-    confidence: float
-    entry_price: float
-    target_price: float
-    stop_loss: float
-    timestamp: float
-    timeframe: str
+    
+    # Path (e.g., ETH -> USDC -> DAI -> ETH)
+    path: List[str] = field(default_factory=list)
+    exchanges: List[str] = field(default_factory=list)
+    
+    # Amounts
+    amount_in: float = 0.0
+    amount_out: float = 0.0
+    min_out: float = 0.0
+    
+    # Pool data
+    pool_addresses: List[str] = field(default_factory=list)
+    pool_liquidities: List[float] = field(default_factory=list)
+    fee_tiers: List[int] = field(default_factory=list)
+    
+    # Token addresses for on-chain execution
+    token_addresses: List[str] = field(default_factory=list)
+    
+    # Legacy fields (for compatibility)
+    token_in: str = ""
+    token_out: str = ""
+    amount: float = 0.0
+    
+    # Calculated values
+    expected_profit: float = 0.0
+    confidence: float = 0.0
+    entry_price: float = 0.0
+    target_price: float = 0.0
+    stop_loss: float = 0.0
+    
+    # Timing
+    timestamp: float = 0.0
+    timeframe: str = ""
+    expires_at: float = 0.0
+    
+    # Additional data
     indicators: Dict = field(default_factory=dict)
+    
+    def validate(self) -> bool:
+        """Validate signal has all required swap fields"""
+        if not self.path or len(self.path) < 2:
+            return False
+        if self.amount_in <= 0:
+            return False
+        if not self.pool_addresses:
+            return False
+        if self.min_out <= 0:
+            return False
+        if any(liq <= 0 for liq in self.pool_liquidities):
+            return False
+        return True
+    
+    def to_dict(self) -> Dict:
+        return {
+            "path": self.path,
+            "exchanges": self.exchanges,
+            "amount_in": self.amount_in,
+            "amount_out": self.amount_out,
+            "min_out": self.min_out,
+            "pool_addresses": self.pool_addresses,
+            "pool_liquidities": self.pool_liquidities,
+            "fee_tiers": self.fee_tiers,
+            "token_addresses": self.token_addresses,
+            "expected_profit": self.expected_profit,
+            "confidence": self.confidence,
+            "valid": self.validate(),
+            "timestamp": self.timestamp,
+        }
 
 
 @dataclass
@@ -95,12 +153,22 @@ class AggressiveArbitrageScanner:
         # Exchange prices cache
         self.exchange_prices: Dict[str, Dict[str, float]] = {}
         
+
     async def scan_arbitrage_opportunities(self) -> List[TradeSignal]:
-        """Scan for cross-exchange arbitrage opportunities"""
+        """Scan for cross-exchange arbitrage opportunities with COMPLETE swap data"""
+        import os
+        from web3 import Web3
+        
         opportunities = []
+        rpc_url = os.getenv("ETHEREUM_RPC_URL", "http://localhost:8545")
+        w3 = Web3(Web3.HTTPProvider(rpc_url))
         
         tokens = self.config.get("tokens", [])
         exchanges = self.config.get("exchanges", [])
+        amount = self.config.get("loan_amount", 75000)
+        
+        # Get token addresses
+        token_addresses = self._get_token_addresses()
         
         # Check all token pairs across all exchanges
         for token_in in tokens:
@@ -122,19 +190,61 @@ class AggressiveArbitrageScanner:
                             diff = abs(price1 - price2) / min(price1, price2)
                             
                             if diff >= self.MIN_PRICE_DIFF:
-                                # Calculate potential profit
+                                # Get pool data for BOTH exchanges
+                                pool1_addr = await self._get_pool_address(
+                                    token_addresses.get(token_in.upper(), ""),
+                                    token_addresses.get(token_out.upper(), ""),
+                                    ex1, w3
+                                )
+                                pool2_addr = await self._get_pool_address(
+                                    token_addresses.get(token_in.upper(), ""),
+                                    token_addresses.get(token_out.upper(), ""),
+                                    ex2, w3
+                                )
+                                
+                                liquidity1 = await self._get_pool_liquidity(pool1_addr, w3) if pool1_addr else 0
+                                liquidity2 = await self._get_pool_liquidity(pool2_addr, w3) if pool2_addr else 0
+                                
+                                # Get amounts
+                                amount_out1 = await self._get_amount_out(
+                                    token_addresses.get(token_in.upper(), ""),
+                                    token_addresses.get(token_out.upper(), ""),
+                                    amount, ex1, w3
+                                )
+                                amount_out2 = await self._get_amount_out(
+                                    token_addresses.get(token_in.upper(), ""),
+                                    token_addresses.get(token_out.upper(), ""),
+                                    amount, ex2, w3
+                                )
+                                
+                                # Calculate profit
                                 profit = await self._calculate_arbitrage_profit(
-                                    token_in, token_out, 
-                                    self.config.get("loan_amount", 75000),
-                                    ex1, ex2
+                                    token_in, token_out, amount, ex1, ex2
                                 )
                                 
                                 if profit >= self.min_profit:
+                                    # Build complete swap data
+                                    fee_tier1 = 3000 if "v3" in ex1 else 300
+                                    fee_tier2 = 3000 if "v3" in ex2 else 300
+                                    
                                     signal = TradeSignal(
                                         strategy=TradingStrategy.ARBITRAGE,
+                                        path=[token_in, token_out],
+                                        exchanges=[ex1, ex2],
+                                        amount_in=amount,
+                                        amount_out=max(amount_out1, amount_out2),
+                                        min_out=min(amount_out1, amount_out2) * 0.99,
+                                        pool_addresses=[pool1_addr or "", pool2_addr or ""],
+                                        pool_liquidities=[liquidity1, liquidity2],
+                                        fee_tiers=[fee_tier1, fee_tier2],
+                                        token_addresses=[
+                                            token_addresses.get(token_in.upper(), ""),
+                                            token_addresses.get(token_out.upper(), "")
+                                        ],
+                                        # Legacy fields
                                         token_in=token_in,
                                         token_out=token_out,
-                                        amount=self.config.get("loan_amount", 75000),
+                                        amount=amount,
                                         expected_profit=profit,
                                         confidence=self._calculate_confidence(diff),
                                         entry_price=price1,
@@ -142,13 +252,89 @@ class AggressiveArbitrageScanner:
                                         stop_loss=price1 * (1 - self.max_slippage),
                                         timestamp=time.time(),
                                         timeframe="1m",
-                                        indicators={"price_diff": diff, "exchange_1": ex1, "exchange_2": ex2}
+                                        expires_at=time.time() + 30,
+                                        indicators={
+                                            "price_diff": diff,
+                                            "exchange_1": ex1,
+                                            "exchange_2": ex2,
+                                            "price_impact": amount / max(liquidity1, liquidity2) if max(liquidity1, liquidity2) > 0 else 0
+                                        }
                                     )
                                     opportunities.append(signal)
         
         # Sort by profit
         opportunities.sort(key=lambda x: x.expected_profit, reverse=True)
         return opportunities[:self.config.get("max_concurrent_trades", 15)]
+    
+    async def _get_pool_address(self, token_a: str, token_b: str, exchange: str, w3) -> Optional[str]:
+        """Get pool address for token pair on exchange"""
+        try:
+            if not token_a or not token_b:
+                return None
+                
+            if "uniswap_v3" in exchange or "v3" in exchange:
+                factory = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+                for fee in [3000, 500, 10000]:
+                    factory_abi = '[{"constant":true,"inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"},{"name":"fee","type":"uint24"}],"name":"getPool","outputs":[{"name":"pool","type":"address"}],"type":"function"}]'
+                    factory_contract = w3.eth.contract(address=factory, abi=factory_abi)
+                    pool = factory_contract.functions.getPool(token_a, token_b, fee).call()
+                    if pool != "0x0000000000000000000000000000000000000000":
+                        return pool
+            
+            elif "uniswap_v2" in exchange or "sushi" in exchange:
+                factory = "0x5C69bEe701ef814a2B6fe3cF77eE1eD5e2b3f2c4"
+                if token_a.lower() > token_b.lower():
+                    token_a, token_b = token_b, token_a
+                factory_abi = '[{"constant":true,"inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"}],"name":"getPair","outputs":[{"name":"pair","type":"address"}],"type":"function"}]'
+                factory_contract = w3.eth.contract(address=factory, abi=factory_abi)
+                pair = factory_contract.functions.getPair(token_a, token_b).call()
+                if pair != "0x0000000000000000000000000000000000000000":
+                    return pair
+            
+            return None
+        except:
+            return None
+    
+    async def _get_pool_liquidity(self, pool_address: str, w3) -> float:
+        """Get pool liquidity in USD"""
+        try:
+            if not pool_address:
+                return 0.0
+            
+            pair_abi = '[{"constant":true,"inputs":[],"name":"getReserves","outputs":[{"name":"reserve0","type":"uint112"},{"name":"reserve1","type":"uint112"},{"name":"blockTimestampLast","type":"uint32"}],"type":"function"}]'
+            contract = w3.eth.contract(address=pool_address, abi=pair_abi)
+            reserves = contract.functions.getReserves().call()
+            
+            # Simplified - use ~$2000/ETH
+            liquidity_eth = (reserves[0] + reserves[1]) / 1e18
+            return liquidity_eth * 2000
+            
+        except:
+            return 0.0
+    
+    async def _get_amount_out(self, token_in: str, token_out: str, amount: float, exchange: str, w3) -> float:
+        """Get expected output amount from swap"""
+        try:
+            pool = await self._get_pool_address(token_in, token_out, exchange, w3)
+            if not pool:
+                return 0.0
+            
+            reserves_abi = '[{"constant":true,"inputs":[],"name":"getReserves","outputs":[{"name":"reserve0","type":"uint112"},{"name":"reserve1","type":"uint112"}],"type":"function"}]'
+            contract = w3.eth.contract(address=pool, abi=reserves_abi)
+            reserves = contract.functions.getReserves().call()
+            
+            fee = 0.003 if "v3" in exchange else 0.003
+            
+            if token_in.lower() < token_out.lower():
+                reserve_in, reserve_out = reserves[0], reserves[1]
+            else:
+                reserve_in, reserve_out = reserves[1], reserves[0]
+            
+            amount_in_fee = amount * (1 - fee)
+            return (amount_in_fee * reserve_out) / (reserve_in + amount_in_fee)
+            
+        except:
+            return 0.0
     
     async def _get_price(self, token_in: str, token_out: str, exchange: str) -> Optional[float]:
         """Get REAL price from exchange using on-chain data"""
