@@ -117,7 +117,7 @@ load_environment() {
     log_info "  - Trading Wallet: ${TRADING_WALLET_ADDRESS:-configured}"
 }
 
-# Install Ethereum node (optional - you can also use Infura/Alchemy)
+# Install Ethereum node (Erigon by default - fastest for bots)
 install_ethereum_node() {
     log_section "Setting Up Ethereum Node"
     
@@ -127,18 +127,17 @@ install_ethereum_node() {
         return 0
     fi
     
-    # Option 1: Use external RPC (Infura/Alchemy) - RECOMMENDED
-    if [ -n "$ETHEREUM_RPC_URL" ] && [[ "$ETHEREUM_RPC_URL" == *"infura"* ]] || [[ "$ETHEREUM_RPC_URL" == *"alchemy"* ]]; then
-        log_info "Using external RPC provider (recommended)"
-        log_info "  Provider: $(echo $ETHEREUM_RPC_URL | sed 's|https://||' | cut -d'.' -f1)"
+    # Always install Erigon for maximum performance (unless explicitly disabled)
+    if [ "$USE_LOCAL_NODE" = "false" ] || [ "$USE_LOCAL_NODE" = "0" ]; then
+        log_info "Using external RPC as configured"
+        if [ -n "$ETHEREUM_RPC_URL" ]; then
+            log_info "  RPC: ${ETHEREUM_RPC_URL}"
+        fi
         return 0
     fi
     
-    # Option 2: Install local node (Erigon - fastest, or Geth)
-    log_warning "No external RPC detected."
-    
-    # Install Erigon (faster than Geth, less disk space)
-    log_info "Installing Erigon (fastest Ethereum client)..."
+    # Install Erigon (fastest Ethereum client for bots)
+    log_info "Installing Erigon node (optimized for trading bots)..."
     
     if command -v erigon &>/dev/null; then
         log_success "Erigon already installed"
@@ -172,10 +171,15 @@ install_ethereum_node() {
     # Create data directory
     mkdir -p "${DATA_DIR}/erigon"
     
-    log_info "To run Erigon manually:"
-    log_info "  erigon --chain mainnet --datadir ${DATA_DIR}/erigon --http --http.api eth,net,erigon --ws"
-    log_info "  or for fast sync:"
-    log_info "  erigon --chain mainnet --datadir ${DATA_DIR}/erigon --http --http.api eth,net,erigon --torrent.upload.rate 50mb"
+    log_info "To run Erigon (optimized for bots):"
+    log_info "  # Full node (takes ~2 weeks to sync, ~400GB disk):"
+    log_info "  erigon --chain mainnet --datadir ${DATA_DIR}/erigon \\"
+    log_info "    --http --http.api eth,net,erigon,debug --http.vhosts=* --http.corsdomain=* \\"
+    log_info "    --ws --prune=rtc --torrent.upload.rate 50mb"
+    log_info ""
+    log_info "  # Fast sync (takes ~1 day):"
+    log_info "  erigon --chain mainnet --datadir ${DATA_DIR}/erigon \\"
+    log_info "    --syncmode=light --http --http.api eth,net,erigon"
     
     log_warning "For production, we recommend using external RPC (Infura/Alchemy)"
 }
