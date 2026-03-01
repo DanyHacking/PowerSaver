@@ -95,7 +95,7 @@ if [ "$ERIGON_RUNNING" = "false" ]; then
         --http.api=eth,debug,net,trace,web3 \
         --http.corsdomain="*" \
         --maxpeers=100 \
-        --prune.mode=prune 2>&1 || echo "   ❌ Napaka pri zagonu Erigona"
+        --prune.mode=minimal 2>&1 || echo "   ❌ Napaka pri zagonu Erigona"
     
     # Čakaj na sync
     echo ""
