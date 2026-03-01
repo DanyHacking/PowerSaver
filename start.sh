@@ -3,8 +3,6 @@
 # ============================================================================
 # POWERSAVER - AVTONOMNI TRGOVALNI BOT
 # ============================================================================
-# Samo poženi in vse se naloži in zažene avtomatsko!
-# ============================================================================
 
 set -e
 
@@ -39,27 +37,17 @@ main() {
     
     # Preveri .env
     if [ ! -f .env ]; then
-        log_error "Manjka .env datoteka!"
+        log_error "Manjka .env!"
+        cp .env.example .env
+        log_success "Ustvaril sem .env - UREDI GA ZDaj!"
         echo ""
-        echo "Ustvari .env z naslednjimi podatki:"
-        echo ""
-        cat .env.example
-        echo ""
+        echo "Odpri .env in vnesi svoje podatke, nato zaženi ./start.sh"
         exit 1
     fi
     
-    # Preveri če so podatki vneseni (preskoči komentarje)
-    if ! grep -vE "^#" .env | grep -qE "^TRADING_WALLET_PRIVATE_KEY=0x[a-fA-F0-9]{64}"; then
-        log_error ".env ni pravilno nastavljen!"
-        echo ""
-        echo "Odpri .env in nastavi (brez # komentarjev):"
-        echo "  TRADING_WALLET_PRIVATE_KEY=0x..."
-        echo "  TRADING_WALLET_ADDRESS=0x..."  
-        echo "  ETHEREUM_RPC_URL=..."
-        exit 1
-    fi
+    log_success "Konfiguracija najdena"
     
-    # Zaženi namestitev in trading
+    # Zaženi
     install_dependencies
     setup_node
     start_trading
@@ -72,16 +60,8 @@ main() {
 install_dependencies() {
     log_info "1/3 Namestam odvisnosti..."
     
-    # Python
-    if ! command -v python3 &>/dev/null; then
-        log_error "Manjka Python3!"
-        exit 1
-    fi
-    
-    # pip
     pip3 install -r requirements.txt -q 2>/dev/null || pip install -r requirements.txt -q 2>/dev/null || true
     
-    # Foundry (če še ni)
     if ! command -v forge &>/dev/null; then
         log_info "Namestam Foundry..."
         curl -L https://foundry.paradigm.xyz | bash
@@ -93,92 +73,36 @@ install_dependencies() {
 }
 
 # ============================================================================
-# NASTAVITEV NODE-A
+# NODE
 # ============================================================================
 
 setup_node() {
     log_info "2/3 Nastavljam Ethereum node..."
     
-    # Preveri ali že teče node
+    # Preveri če že teče
     if curl -s -X POST -H "Content-Type: application/json" \
         --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
         http://localhost:8545 2>/dev/null | grep -q result; then
-        log_success "Node že teče (localhost:8545)"
+        log_success "Node že teče"
         return 0
     fi
     
-    # Preveri RPC v .env
-    source .env
-    
-    if [ -n "$ETHEREUM_RPC_URL" ] && [ "$ETHEREUM_RPC_URL" != "http://localhost:8545" ]; then
-        log_success "Uporabljam zunanji RPC: ${ETHEREUM_RPC_URL:0:40}..."
-        return 0
-    fi
-    
-    # Namesti in zaženi Reth
-    log_info "Namestam Reth node (najhitrejši)..."
-    
-    ARCH=$(uname -m)
-    [ "$ARCH" = "x86_64" ] && ARCH="x86_64" || ARCH="aarch64"
-    
-    cd /tmp
-    if curl -fsSL "https://github.com/paradigmxyz/reth/releases/download/v0.2.0/reth-v0.2.0-${ARCH}-unknown-linux-gnu.tar.gz" -o reth.tar.gz; then
-        sudo tar -xzf reth.tar.gz -C /usr/local/bin --overwrite 2>/dev/null
-        rm reth.tar.gz
-        
-        if command -v reth &>/dev/null; then
-            log_info "Zaženjam Reth (light mode)..."
-            mkdir -p ~/.reth
-            nohup reth node \
-                --chain mainnet \
-                --datadir ~/.reth \
-                --light \
-                --http \
-                --http.api eth,net,debug,trace \
-                --http.vhosts=* \
-                --http.corsdomain=* \
-                > ~/.reth.log 2>&1 &
-            
-            # Čakaj da se zažene
-            sleep 5
-            
-            # Preveri če teče
-            if curl -s -X POST -H "Content-Type: application/json" \
-                --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-                http://localhost:8545 2>/dev/null | grep -q result; then
-                log_success "Reth teče na http://localhost:8545"
-            else
-                log_warning "Reth se ni zagnal, uporabljam zunanji RPC"
-            fi
-        fi
-    else
-        log_warning "Reth ni na voljo, uporabljam zunanji RPC"
-    fi
-    
-    cd "$SCRIPT_DIR"
+    log_info "Uporabljam zunanji RPC"
 }
 
 # ============================================================================
-# ZAGON TRADINGA
+# ZAGON
 # ============================================================================
 
 start_trading() {
-    log_info "3/3 ${GREEN}🚀 ZAŽENAM AVTONOMNEGA BOTA!${NC}"
+    log_info "3/3 🚀 ZAŽENAM BOTA!"
     echo ""
     echo "╔══════════════════════════════════════════════════════════════════╗"
     echo "║                    🤖 BOT TEČE 24/7 🤖                        ║"
-    echo "╠══════════════════════════════════════════════════════════════════╣"
-    echo "║  - Skenira priložnosti                                        ║"
-    echo "║  - Izvršuje posle                                            ║"
-    echo "║  - Upravlja tveganja                                         ║"
-    echo "║                                                                  ║"
-    echo "║  Za zaustavitev pritisni: Ctrl + C                            ║"
     echo "╚══════════════════════════════════════════════════════════════════╝"
     echo ""
     
-    # Zaženi
     python3 -m src.main --network mainnet
 }
 
-# Zagon
 main "$@"
