@@ -8,32 +8,82 @@ echo "=========================================="
 # Auto-install dependencies
 pip3 install -q python-dotenv web3 eth-account 2>/dev/null || true
 
-# Check if Erigon is needed
-USE_LOCAL_ERIGON=${USE_LOCAL_ERIGON:-false}
+# Check if Erigon is already running
+ERIGON_RUNNING=false
+if curl -s -X POST -H "Content-Type: application/json" \
+   --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+   http://localhost:8545 >/dev/null 2>&1; then
+    ERIGON_RUNNING=true
+    echo "✅ Erigon node že teče!"
+fi
 
-if [ "$USE_LOCAL_ERIGON" = "true" ]; then
+# Start Erigon if not running
+if [ "$ERIGON_RUNNING" = "false" ]; then
     echo "🔧 Začenjam Erigon node..."
-    docker-compose up -d erigon
-    echo "⏳ Čakam da se Erigon sync-a (to lahko traja ure/dni)..."
-    echo "   Za hitrejši začetek pritisni Ctrl+C in nadaljuj brez Erigona"
-    echo "   Ali nastavi USE_LOCAL_ERIGON=false"
     
-    # Wait for Erigon to be ready
-    for i in {1..60}; do
+    # Check if docker-compose erigon service exists
+    if docker-compose ps erigon 2>/dev/null | grep -q "Up"; then
+        echo "✅ Erigon container že dela"
+    else
+        # Start Erigon container
+        docker-compose up -d erigon || {
+            echo "❌ Napaka pri zagonu Erigona"
+            echo "   Poskusam z docker run..."
+            docker run -d --name erigon-node \
+                -p 8545:8545 -p 8546:8546 -p 30303:30303 \
+                -v erigon-data:/erigon \
+                thorax/erigon:latest \
+                --prune=prune --chain=mainnet \
+                --http.vaddr=0.0.0.0:8545 \
+                --ws.vaddr=0.0.0.0:8546 \
+                --http.api=eth,debug,net,trace,web3
+        }
+    fi
+    
+    echo "⏳ Čakam da se Erigon sync-a..."
+    echo "   (To lahko traja več ur/dni - prvi sync je najdaljši)"
+    echo ""
+    
+    # Wait for Erigon with progress
+    SYNCED=false
+    for i in {1..3600}; do  # 5 hours max wait
         if curl -s -X POST -H "Content-Type: application/json" \
            --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
            http://localhost:8545 >/dev/null 2>&1; then
-            echo "✅ Erigon je pripravljen!"
-            break
+            
+            # Get current block
+            BLOCK=$(curl -s -X POST -H "Content-Type: application/json" \
+                --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                http://localhost:8545 | grep -o '"result":"0x[^"]*"' | cut -d'"' -f4)
+            
+            if [ -n "$BLOCK" ]; then
+                echo "✅ Erigon SYNCD! Block: $BLOCK"
+                SYNCED=true
+                break
+            fi
         fi
-        echo "   Čakam... ($i/60)"
-        sleep 5
+        
+        if [ $((i % 30)) -eq 0 ]; then
+            echo "   Še vedno syncam... ($i/3600)"
+        fi
+        sleep 10
     done
+    
+    if [ "$SYNCED" = "false" ]; then
+        echo "⚠️  Erigon še ni synced, ampak nadaljujem z zagonom bota..."
+        echo "   (Bot bo deloval z javnim RPC dokler se Erigon ne synca)"
+    fi
 fi
 
 # Ensure .env exists
 if [ ! -f .env ]; then
     cp .env.example .env
+fi
+
+# Use local Erigon RPC
+sed -i 's|ETHEREUM_RPC_URL=.*|ETHEREUM_RPC_URL=http://localhost:8545|g' .env 2>/dev/null || true
+if ! grep -q "^ETHEREUM_RPC_URL=" .env; then
+    echo "ETHEREUM_RPC_URL=http://localhost:8545" >> .env
 fi
 
 # Load existing or generate wallet
@@ -77,20 +127,6 @@ with open('.env', 'w') as f:
 print(f"✅ Nova denarnica ustvarjena!")
 print(f"   Naslov: {acct.address}")
 PYEOF
-fi
-
-# Fix placeholder values
-sed -i 's|https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID|https://rpc.ankr.com/eth|g' .env 2>/dev/null || true
-sed -i 's|0x0000000000000000000000000000000000000000000000|0x0000000000000000000000000000000000000001|g' .env 2>/dev/null || true
-
-# Use local Erigon if enabled
-if [ "$USE_LOCAL_ERIGON" = "true" ]; then
-    sed -i 's|ETHEREUM_RPC_URL=.*|ETHEREUM_RPC_URL=http://localhost:8545|g' .env 2>/dev/null || true
-fi
-
-# Ensure required variables
-if ! grep -q "^ETHEREUM_RPC_URL=" .env; then
-    echo "ETHEREUM_RPC_URL=https://rpc.ankr.com/eth" >> .env
 fi
 
 echo ""
