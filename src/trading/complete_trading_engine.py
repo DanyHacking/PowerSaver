@@ -268,6 +268,7 @@ class GasOptimizer:
         return {
             "current_gas": current_gas,
             "optimal_gas": optimal_gas,
+            "optimal": current_gas <= optimal_gas * 1.1,
             "estimated_savings_percent": estimated_savings,
             "recommendation": "Use optimal gas" if estimated_savings > 10 else "Current gas is optimal",
             "estimated_savings_usd": estimated_savings * 0.5
