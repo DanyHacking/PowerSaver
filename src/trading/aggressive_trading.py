@@ -934,9 +934,35 @@ class AggressiveTradingEngine:
         self.last_reset = time.time()
         
     async def start(self):
-        """Start aggressive trading"""
+        """Start aggressive trading - AUTONOMOUS LOOP"""
         self.is_running = True
         logger.info("🚀 Aggressive Trading Engine started")
+        
+        # AUTONOMOUS MAIN LOOP
+        while self.is_running:
+            try:
+                # Scan for opportunities
+                opportunities = await self.scan_all_opportunities()
+                
+                if opportunities:
+                    logger.info(f"Found {len(opportunities)} opportunities")
+                    
+                    # Execute best opportunity
+                    best = opportunities[0]
+                    if best.validate():
+                        result = await self.execute_trade(best)
+                        logger.info(f"Trade executed: {result.status}")
+                
+                # Wait before next scan
+                await asyncio.sleep(self.config.get("scan_interval_seconds", 0.5))
+                
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                logger.error(f"Error in trading loop: {e}")
+                await asyncio.sleep(1)  # Brief pause on error
+        
+        logger.info("🛑 Aggressive Trading Engine stopped")
         
     async def stop(self):
         """Stop aggressive trading"""
