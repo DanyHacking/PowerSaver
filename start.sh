@@ -48,14 +48,14 @@ main() {
         exit 1
     fi
     
-    # Preveri če so podatki vneseni
-    if ! grep -qE "^TRADING_WALLET_PRIVATE_KEY=0x[a-fA-F0-9]{64}" .env 2>/dev/null; then
+    # Preveri če so podatki vneseni (preskoči komentarje)
+    if ! grep -vE "^#" .env | grep -qE "^TRADING_WALLET_PRIVATE_KEY=0x[a-fA-F0-9]{64}"; then
         log_error ".env ni pravilno nastavljen!"
         echo ""
-        echo "Odpri .env in nastavi:"
-        echo "  - TRADING_WALLET_PRIVATE_KEY"
-        echo "  - TRADING_WALLET_ADDRESS"  
-        echo "  - ETHEREUM_RPC_URL"
+        echo "Odpri .env in nastavi (brez # komentarjev):"
+        echo "  TRADING_WALLET_PRIVATE_KEY=0x..."
+        echo "  TRADING_WALLET_ADDRESS=0x..."  
+        echo "  ETHEREUM_RPC_URL=..."
         exit 1
     fi
     
