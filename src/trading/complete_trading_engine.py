@@ -757,6 +757,11 @@ class CompleteAutonomousTradingEngine:
         logger.info("Complete autonomous trading system stopped")
     
     async def _trading_loop(self):
+        recursion_depth = 0
+        if hasattr(self, "_recursion_depth"):
+            recursion_depth = self._recursion_depth
+        self._recursion_depth = 0
+
         while self.is_running:
             try:
                 await self._check_system_health()
