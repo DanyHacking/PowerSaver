@@ -2,8 +2,8 @@
 pragma solidity ^0.8.19;
 
 /**
- * @title PowerSaver V5 - Ultimate MEV-Arbitrage Executor
- * @notice Production-ready, gas-optimized, with full MEV protection
+ * @title PowerSaver V5 - Production-Ready MEV-Arbitrage Executor
+ * @notice Gas-optimized, fully hardened security
  */
 contract PowerSaverV5 {
     // ============ ERRORS ============
@@ -16,18 +16,27 @@ contract PowerSaverV5 {
     error NotAavePool();
     error InvalidInitiator();
     error ProfitTooLow();
+    error Reentrancy();
+    error ApproveFail();
+    error MaxLoanExceeded();
+    error TransferFail();
 
     // ============ STATE ============
     address public owner;
     bool public paused;
+    bool public ownerOnly = true;
 
     mapping(address => bool) public authorized;
 
-    // Routers + Aave Pool
-    address public uniV2 = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
-    address public sushi = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
-    address public uniV3 = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
-    address public aavePool = 0x87870Bca3F3fD6335C3FbdC83E7a82f43aa0B2fE;
+    // Routers + Aave Pool (mainnet defaults)
+    address public immutable uniV2;
+    address public immutable sushi;
+    address public immutable uniV3;
+    address public immutable aavePool;
+
+    // Limits
+    uint256 public maxLoan = type(uint256).max;
+    uint256 public ttl = 120;  // Transaction deadline in seconds
 
     // Reentrancy guard
     bool private locked;
@@ -39,10 +48,15 @@ contract PowerSaverV5 {
     // Events
     event Executed(address indexed asset, uint256 amount, uint256 premium, uint256 profit);
     event SetPaused(bool paused);
+    event SetOwnerOnly(bool ownerOnly);
     event SetAuth(address indexed user, bool authorized);
     event SetRouter(bytes32 indexed which, address router);
     event SetAavePool(address pool);
+    event SetMaxLoan(uint256 maxLoan);
+    event SetTTL(uint256 ttl);
+    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
     event Withdraw(address indexed token, uint256 amount);
+    event Route(bytes32 indexed routeHash);
 
     // ============ MODIFIERS ============
     modifier onlyOwner() {
@@ -56,7 +70,7 @@ contract PowerSaverV5 {
     }
 
     modifier nonReentrant() {
-        if (locked) revert NotAuthorized();
+        if (locked) revert Reentrancy();
         locked = true;
         _;
         locked = false;
@@ -65,27 +79,37 @@ contract PowerSaverV5 {
     constructor() {
         owner = msg.sender;
         authorized[msg.sender] = true;
+        
+        // Set router addresses
+        uniV2 = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
+        sushi = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
+        uniV3 = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
+        aavePool = 0x87870Bca3F3fD6335C3FbdC83E7a82f43aa0B2fE;
     }
 
     // ============ ENTRY POINT ============
-    /**
-     * @notice Request Aave V3 simple flash loan
-     */
     function requestFlashLoan(
         address asset,
         uint256 amount,
         bytes calldata params
     ) external whenNotPaused {
-        if (!authorized[msg.sender]) revert NotAuthorized();
+        // Security: ownerOnly option
+        if (ownerOnly) {
+            if (msg.sender != owner) revert NotAuthorized();
+        } else {
+            if (!authorized[msg.sender]) revert NotAuthorized();
+        }
+        
         if (amount == 0) revert InvalidParams();
+        if (amount > maxLoan) revert MaxLoanExceeded();
+
+        // Emit route hash for debugging
+        emit Route(keccak256(params));
 
         IAavePool(aavePool).flashLoanSimple(address(this), asset, amount, params, 0);
     }
 
     // ============ AAVE CALLBACK ============
-    /**
-     * @notice Aave V3 callback - validates caller & executes arbitrage
-     */
     function executeOperation(
         address asset,
         uint256 amount,
@@ -105,20 +129,26 @@ contract PowerSaverV5 {
             uint256 minProfit
         ) = abi.decode(params, (address[], address[], uint24[], uint256[], uint256));
 
+        // Validation
         uint256 hops = routers.length;
-        if (hops == 0 || path.length != hops || minOuts.length != hops || v3Fees.length != hops) 
+        if (hops == 0) revert InvalidParams();
+        if (path.length != hops || minOuts.length != hops || v3Fees.length != hops) 
             revert InvalidParams();
+        
+        // Security: route must end in original asset for repayment
+        if (path[hops - 1] != asset) revert InvalidParams();
 
         // Execute swaps
         uint256 startBal = IERC20(asset).balanceOf(address(this));
         _swapMulti(asset, amount, path, routers, v3Fees, minOuts);
         uint256 endBal = IERC20(asset).balanceOf(address(this));
 
-        // Profit validation
-        uint256 required = startBal + premium + minProfit;
-        if (endBal < required) revert ProfitTooLow();
-
+        // Robust profit validation
+        if (endBal <= startBal + premium) revert ProfitTooLow();
+        
         uint256 profit = endBal - (startBal + premium);
+        if (profit < minProfit) revert ProfitTooLow();
+
         totalLoans++;
         totalProfit += profit;
 
@@ -140,12 +170,17 @@ contract PowerSaverV5 {
     ) internal {
         uint256 current = amountIn;
         address currentToken = tokenIn;
+        uint256 deadline = block.timestamp + ttl;
 
         for (uint256 i = 0; i < routers.length; i++) {
             address r = routers[i];
             address tokenOut = path[i];
 
+            // Router whitelist
             if (r != uniV2 && r != sushi && r != uniV3) revert InvalidRouter();
+
+            // V3 fee validation
+            if (r == uniV3 && v3Fees[i] == 0) revert InvalidParams();
 
             if (r == uniV2 || r == sushi) {
                 _forceApprove(currentToken, r, current);
@@ -154,10 +189,11 @@ contract PowerSaverV5 {
                 p[1] = tokenOut;
 
                 uint256[] memory out = IUniV2(r).swapExactTokensForTokens(
-                    current, minOuts[i], p, address(this), block.timestamp + 120
+                    current, minOuts[i], p, address(this), deadline
                 );
-                if (out[1] < minOuts[i]) revert SlippageExceeded();
-                current = out[1];
+                uint256 got = out[out.length - 1];
+                if (got < minOuts[i]) revert SlippageExceeded();
+                current = got;
             } else {
                 _forceApprove(currentToken, r, current);
                 current = IUniV3(r).exactInputSingle(
@@ -166,7 +202,7 @@ contract PowerSaverV5 {
                         tokenOut: tokenOut,
                         fee: v3Fees[i],
                         recipient: address(this),
-                        deadline: block.timestamp + 120,
+                        deadline: deadline,
                         amountIn: current,
                         amountOutMinimum: minOuts[i],
                         sqrtPriceLimitX96: 0
@@ -178,9 +214,32 @@ contract PowerSaverV5 {
         }
     }
 
+    // ============ SAFE APPROVE/TRANSFER ============
     function _forceApprove(address token, address spender, uint256 amount) internal {
-        IERC20(token).approve(spender, 0);
-        IERC20(token).approve(spender, amount);
+        // 1) Try direct approve
+        (bool ok1, bytes memory data1) = token.call(
+            abi.encodeWithSelector(IERC20.approve.selector, spender, amount)
+        );
+        if (ok1 && (data1.length == 0 || abi.decode(data1, (bool)))) return;
+
+        // 2) Reset to zero
+        (bool ok2, bytes memory data2) = token.call(
+            abi.encodeWithSelector(IERC20.approve.selector, spender, 0)
+        );
+        if (!(ok2 && (data2.length == 0 || abi.decode(data2, (bool))))) revert ApproveFail();
+
+        // 3) Try approve again
+        (bool ok3, bytes memory data3) = token.call(
+            abi.encodeWithSelector(IERC20.approve.selector, spender, amount)
+        );
+        if (!(ok3 && (data3.length == 0 || abi.decode(data3, (bool))))) revert ApproveFail();
+    }
+
+    function _safeTransfer(address token, address to, uint256 amount) internal {
+        (bool ok, bytes memory data) = token.call(
+            abi.encodeWithSelector(IERC20.transfer.selector, to, amount)
+        );
+        if (!(ok && (data.length == 0 || abi.decode(data, (bool))))) revert TransferFail();
     }
 
     // ============ ADMIN ============
@@ -189,27 +248,50 @@ contract PowerSaverV5 {
         emit SetPaused(_paused);
     }
 
+    function setOwnerOnly(bool _ownerOnly) external onlyOwner {
+        ownerOnly = _ownerOnly;
+        emit SetOwnerOnly(_ownerOnly);
+    }
+
     function setAuth(address user, bool _auth) external onlyOwner {
         authorized[user] = _auth;
         emit SetAuth(user, _auth);
     }
 
-    function setRouter(bytes32 which, address router) external onlyOwner {
-        if (which == bytes32("uniV2")) uniV2 = router;
-        else if (which == bytes32("uniV3")) uniV3 = router;
-        else if (which == bytes32("sushi")) sushi = router;
-        else revert InvalidParams();
-        emit SetRouter(which, router);
+    // NOTE: Routers are immutable - cannot be changed after deployment
+    // If you need different routers, deploy a new contract
+    
+    function setMaxLoan(uint256 _maxLoan) external onlyOwner {
+        maxLoan = _maxLoan;
+        emit SetMaxLoan(_maxLoan);
     }
 
-    function setAavePool(address pool) external onlyOwner {
-        aavePool = pool;
-        emit SetAavePool(pool);
+    function setTTL(uint256 _ttl) external onlyOwner {
+        // Range: 10-600 seconds
+        if (_ttl < 10 || _ttl > 600) revert InvalidParams();
+        ttl = _ttl;
+        emit SetTTL(_ttl);
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert InvalidParams();
+        address oldOwner = owner;
+        
+        // Clear old owner authorization
+        authorized[oldOwner] = false;
+        
+        owner = newOwner;
+        authorized[newOwner] = true;
+        
+        emit OwnershipTransferred(oldOwner, newOwner);
     }
 
     function withdraw(address token, uint256 amount) external onlyOwner {
-        if (token == address(0)) payable(owner).transfer(amount);
-        else IERC20(token).transfer(owner, amount);
+        if (token == address(0)) {
+            payable(owner).transfer(amount);
+        } else {
+            _safeTransfer(token, owner, amount);
+        }
         emit Withdraw(token, amount);
     }
 
