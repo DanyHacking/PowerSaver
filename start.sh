@@ -8,6 +8,29 @@ echo "=========================================="
 # Auto-install dependencies
 pip3 install -q python-dotenv web3 eth-account 2>/dev/null || true
 
+# Check if Erigon is needed
+USE_LOCAL_ERIGON=${USE_LOCAL_ERIGON:-false}
+
+if [ "$USE_LOCAL_ERIGON" = "true" ]; then
+    echo "🔧 Začenjam Erigon node..."
+    docker-compose up -d erigon
+    echo "⏳ Čakam da se Erigon sync-a (to lahko traja ure/dni)..."
+    echo "   Za hitrejši začetek pritisni Ctrl+C in nadaljuj brez Erigona"
+    echo "   Ali nastavi USE_LOCAL_ERIGON=false"
+    
+    # Wait for Erigon to be ready
+    for i in {1..60}; do
+        if curl -s -X POST -H "Content-Type: application/json" \
+           --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+           http://localhost:8545 >/dev/null 2>&1; then
+            echo "✅ Erigon je pripravljen!"
+            break
+        fi
+        echo "   Čakam... ($i/60)"
+        sleep 5
+    done
+fi
+
 # Ensure .env exists
 if [ ! -f .env ]; then
     cp .env.example .env
@@ -21,38 +44,14 @@ if [ -z "$TRADING_WALLET_PRIVATE_KEY" ] || [ "$TRADING_WALLET_PRIVATE_KEY" == "0
     echo "📋 Ustvarjam novo denarnico..."
     python3 << 'PYEOF'
 from eth_account import Account
-import secrets
-
-# Generate mnemonic
-mnemonic = ' '.join([secrets.choice("abcdefghijklmnopqrstuvwxyz") + ''.join(secrets.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(11)) for _ in range(12)])
-# Actually use proper bip39
-from bip39 import mnemonic_to_seed
-import hashlib
-
-# Simple 12-word mnemonic
-words = open("/usr/share/dict/words").read().splitlines() if __name__ == "__main__" else None
-
-# Use eth_account's built-in
-acct = Account.create()
-print(f"PRIVATE_KEY={acct.key.hex()}")
-print(f"WALLET_ADDRESS={acct.address}")
-PYEOF
-    
-    # Save to .env
-    python3 << 'PYEOF'
-from eth_account import Account
 import os
 
-# Generate new wallet
 acct = Account.create()
-
-# Read existing .env
 env_lines = []
 if os.path.exists('.env'):
     with open('.env', 'r') as f:
         env_lines = f.readlines()
 
-# Update or add keys
 found_key = False
 found_addr = False
 new_lines = []
@@ -77,13 +76,17 @@ with open('.env', 'w') as f:
 
 print(f"✅ Nova denarnica ustvarjena!")
 print(f"   Naslov: {acct.address}")
-print(f"   Shrani si MNEMONIC ali PRIVATE KEY!")
 PYEOF
 fi
 
 # Fix placeholder values
 sed -i 's|https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID|https://rpc.ankr.com/eth|g' .env 2>/dev/null || true
-sed -i 's|0x0000000000000000000000000000000000000000000000000000000000000000|0x0000000000000000000000000000000000000001|g' .env 2>/dev/null || true
+sed -i 's|0x0000000000000000000000000000000000000000000000|0x0000000000000000000000000000000000000001|g' .env 2>/dev/null || true
+
+# Use local Erigon if enabled
+if [ "$USE_LOCAL_ERIGON" = "true" ]; then
+    sed -i 's|ETHEREUM_RPC_URL=.*|ETHEREUM_RPC_URL=http://localhost:8545|g' .env 2>/dev/null || true
+fi
 
 # Ensure required variables
 if ! grep -q "^ETHEREUM_RPC_URL=" .env; then
@@ -94,5 +97,4 @@ echo ""
 echo "🚀 Začenjam trading bot..."
 echo ""
 
-# Run the bot
 exec python3 -m src.main

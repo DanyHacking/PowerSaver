@@ -215,3 +215,25 @@ volumes:
   elasticsearch_data:
   postgres_data:
   redis_data:
+  # ======================== ETHEREUM NODE (ERIGON) ========================
+  erigon:
+    image: thorax/erigon:latest
+    container_name: erigon-node
+    restart: unless-stopped
+    ports:
+      - "8545:8545"
+      - "8546:8546"
+      - "30303:30303"
+    environment:
+      - ERIGON_HTTP_VADDR=0.0.0.0:8545
+      - ERIGON_WS_VADDR=0.0.0.0:8546
+      - ERIGON_HTTP_API=eth,debug,net,trace,web3
+      - ERIGON_CHAIN=mainnet
+      - ERIGON_MAX_PEERS=100
+      - ERIGON_SNAPSHOT=fast
+    volumes:
+      - erigon-data:/erigon
+    command: --prune=prune
+
+volumes:
+  erigon-data:
