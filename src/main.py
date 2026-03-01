@@ -5,6 +5,7 @@ Configuration loaded from .env file
 """
 
 import asyncio
+import os
 import logging
 import argparse
 from pathlib import Path

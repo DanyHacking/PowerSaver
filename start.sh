@@ -1,576 +1,181 @@
 #!/bin/bash
 
 # ============================================================================
-# Autonomous Flash Loan Trading System - Mainnet Production Deployment
+# POWERSAVER - AVTONOMNI TRGOVALNI BOT
 # ============================================================================
-# REAL mainnet autonomous trading bot - 24/7 production operation
-# NO simulations, NO test modes - PURE production trading
-# Uses REAL Ethereum mainnet node infrastructure
+# Samo poženi in vse se naloži in zažene avtomatsko!
 # ============================================================================
 
 set -e
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Configuration
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
+log_error() { echo -e "${RED}[X]${NC} $1"; }
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${SCRIPT_DIR}/logs"
-DATA_DIR="${SCRIPT_DIR}/data"
-CONFIG_DIR="${SCRIPT_DIR}/config"
+cd "$SCRIPT_DIR"
 
-# Logging functions
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
+# ============================================================================
+# GLAVNI PROGRAM
+# ============================================================================
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-log_section() {
-    echo -e "\n${BLUE}=== $1 ===${NC}\n"
-}
-
-# Cleanup function
-cleanup() {
-    log_warning "Shutting down trading system..."
-    if [ -n "$TRADING_ENGINE_PID" ]; then
-        kill $TRADING_ENGINE_PID 2>/dev/null || true
-    fi
-}
-
-trap cleanup EXIT
-
-# Check prerequisites
-check_prerequisites() {
-    log_section "Checking Prerequisites"
-    
-    command -v python3 &>/dev/null || { log_error "python3 required"; exit 1; }
-    command -v pip3 &>/dev/null || { log_error "pip3 required"; exit 1; }
-    command -v curl &>/dev/null || { log_error "curl required"; exit 1; }
-    command -v jq &>/dev/null || { log_error "jq required"; exit 1; }
-    
-    if command -v forge &>/dev/null; then
-        log_success "Foundry (forge) is installed"
-    else
-        log_warning "Foundry not installed. Installing..."
-        curl -L https://foundry.paradigm.xyz | bash
-        source "$HOME/.bashrc" || source "$HOME/.zshrc"
-        foundryup
-    fi
-    
-    if command -v node &>/dev/null; then
-        log_success "Node.js is installed: $(node --version)"
-    else
-        log_error "Node.js is required but not installed"
-        exit 1
-    fi
-    
-    log_info "Installing Python dependencies..."
-    if [ -f "requirements.txt" ]; then
-        pip3 install -r requirements.txt -q
-        log_success "Python dependencies installed"
-    fi
-    
-    log_success "All prerequisites met"
-}
-
-# Setup directories
-setup_directories() {
-    log_section "Setting Up Directories"
-    
-    mkdir -p "$LOG_DIR"
-    mkdir -p "$DATA_DIR"
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "${SCRIPT_DIR}/artifacts"
-    
-    log_success "Directories created"
-}
-
-# Load environment variables
-load_environment() {
-    log_section "Loading Production Environment"
-    
-    if [ ! -f "${SCRIPT_DIR}/.env" ]; then
-        log_error ".env file required for production. Copy from .env.example"
-        exit 1
-    fi
-    
-    export $(grep -v '^#' "${SCRIPT_DIR}/.env" | xargs)
-    
-    log_success "Production environment loaded"
-    log_info "  - Network: ${BLOCKCHAIN_NETWORK:-ethereum}"
-    log_info "  - RPC: ${ETHEREUM_RPC_URL:-configured}"
-    log_info "  - Trading Wallet: ${TRADING_WALLET_ADDRESS:-configured}"
-}
-
-# Install Ethereum node (Reth - fastest & lightest for bots)
-install_ethereum_node() {
-    log_section "Setting Up Ethereum Node"
-    
-    # Check if already running
-    if pgrep -x "geth" > /dev/null || pgrep -x "erigon" > /dev/null || pgrep -x "reth" > /dev/null; then
-        log_success "Ethereum node is already running"
-        
-        # Update RPC to local if node is running
-        if pgrep -x "reth" > /dev/null; then
-            export ETHEREUM_RPC_URL="http://localhost:8545"
-            log_info "Using local Reth RPC: http://localhost:8545"
-        fi
-        return 0
-    fi
-    
-    # Check if user wants local node (default: true for bots)
-    if [ "$USE_LOCAL_NODE" = "false" ] || [ "$USE_LOCAL_NODE" = "0" ]; then
-        log_info "Using external RPC: $ETHEREUM_RPC_URL"
-        return 0
-    fi
-    
-    if command -v reth &>/dev/null; then
-        log_success "Reth already installed"
-    else
-        # Download Reth binary (recommended)
-        log_info "Downloading Reth..."
-        
-        ARCH=$(uname -m)
-        if [ "$ARCH" = "x86_64" ]; then
-            ARCH="x86_64"
-        elif [ "$ARCH" = "aarch64" ]; then
-            ARCH="aarch64"
-        fi
-        
-        RETH_VERSION="v0.2.0"
-        
-        cd /tmp
-        curl -fsSL "https://github.com/paradigmxyz/reth/releases/download/${RETH_VERSION}/reth-${RETH_VERSION}-${ARCH}-unknown-linux-gnu.tar.gz" -o reth.tar.gz
-        
-        if [ -f reth.tar.gz ]; then
-            sudo tar -xzf reth.tar.gz -C /usr/local/bin --overwrite
-            rm reth.tar.gz
-            log_success "Reth installed successfully"
-        else
-            log_warning "Reth download failed, trying Erigon..."
-            install_erigon
-            return 0
-        fi
-    fi
-    
-    # Create data directory
-    mkdir -p "${DATA_DIR}/reth"
-    
-    log_success "Reth installed!"
-    log_info ""
-    log_info "🚀 STARTING LIGHT NODE FOR BOTS:"
-    log_info "==========================="
-    log_info "  # Light node (fastest - ~1GB, ready in minutes):"
-    log_info "  reth node \\"
-    log_info "    --chain mainnet \\"
-    log_info "    --datadir ${DATA_DIR}/reth \\"
-    log_info "    --http \\"
-    log_info "    --http.api eth,net,debug,trace \\"
-    log_info "    --http.vhosts=* \\"
-    log_info "    --light"
-    log_info ""
-    log_info "  # Full node (more data, better for history queries):"
-    log_info "  reth node \\"
-    log_info "    --chain mainnet \\"
-    log_info "    --datadir ${DATA_DIR}/reth \\"
-    log_info "    --http \\"
-    log_info "    --http.api eth,net,debug,trace \\"
-    log_info "    --prune.timestamps.0"
-    log_info ""
-    log_info "  # Or just run with defaults:"
-    log_info "  reth node --chain mainnet --datadir ${DATA_DIR}/reth --http"
-    log_info ""
-    
-    # Auto-start light node for bot
-    log_info "Starting light node in background..."
-    nohup reth node \
-        --chain mainnet \
-        --datadir "${DATA_DIR}/reth" \
-        --http \
-        --http.api eth,net,debug,trace \
-        --http.vhosts=* \
-        --http.corsdomain=* \
-        --light \
-        > "${LOG_DIR}/reth.log" 2>&1 &
-    
-    RETH_PID=$!
-    echo $RETH_PID > "${DATA_DIR}/reth.pid"
-    
-    log_success "Reth light node started (PID: $RETH_PID)"
-    
-    # Wait for sync
-    log_info "Waiting for node to sync..."
-    sleep 5
-    
-    # Update RPC to local
-    export ETHEREUM_RPC_URL="http://localhost:8545"
-    log_success "Local RPC ready: http://localhost:8545"
-}
-
-install_erigon() {
-    # Fallback to Erigon
-    log_info "Installing Erigon as fallback..."
-    
-    if command -v erigon &>/dev/null; then
-        log_success "Erigon already installed"
-    else
-        # Download Erigon
-        ETHEREUM_VERSION="v2.59.0"
-        ARCH=$(uname -m)
-        
-        if [ "$ARCH" = "x86_64" ]; then
-            ARCH="amd64"
-        elif [ "$ARCH" = "aarch64" ]; then
-            ARCH="arm64"
-        fi
-        
-        # Download pre-built binary
-        cd /tmp
-        curl -fsSL "https://github.com/ledgerwatch/erigon/releases/download/${ETHEREUM_VERSION}/erigon-${ETHEREUM_VERSION}-linux-${ARCH}.tar.gz" -o erigon.tar.gz
-        
-        if [ -f erigon.tar.gz ]; then
-            sudo tar -xzf erigon.tar.gz -C /usr/local/bin --overwrite
-            rm erigon.tar.gz
-            log_success "Erigon installed"
-        else
-            # Fallback to geth
-            log_warning "Erigon download failed, installing Geth instead..."
-            install_geth
-            return 0
-        fi
-    fi
-    
-    # Create data directory
-    mkdir -p "${DATA_DIR}/erigon"
-    
-    log_info "To run Erigon (optimized for bots):"
-    log_info "  # Full node (takes ~2 weeks to sync, ~400GB disk):"
-    log_info "  erigon --chain mainnet --datadir ${DATA_DIR}/erigon \\"
-    log_info "    --http --http.api eth,net,erigon,debug --http.vhosts=* --http.corsdomain=* \\"
-    log_info "    --ws --prune=rtc --torrent.upload.rate 50mb"
-    log_info ""
-    log_info "  # Fast sync (takes ~1 day):"
-    log_info "  erigon --chain mainnet --datadir ${DATA_DIR}/erigon \\"
-    log_info "    --syncmode=light --http --http.api eth,net,erigon"
-    
-    log_warning "For production, we recommend using external RPC (Infura/Alchemy)"
-}
-
-install_geth() {
-    # Install geth (Gthereum client)
-    if command -v geth &>/dev/null; then
-        log_success "Geth is already installed"
-        return
-    fi
-    
-    log_info "Installing geth..."
-    
-    # Ubuntu/Debian
-    if command -v apt-get &>/dev/null; then
-        sudo apt-get update
-        sudo apt-get install -y software-properties-common
-        sudo add-apt-repository -y ppa:ethereum/ethereum
-        sudo apt-get update
-        sudo apt-get install -y ethereum
-    # CentOS/RHEL
-    elif command -v yum &>/dev/null; then
-        sudo yum install -y epel-release
-        sudo yum install -y geth
-    fi
-    
-    log_success "Geth installed"
-    
-    mkdir -p "${DATA_DIR}/geth"
-}
-
-# Verify mainnet connectivity
-verify_mainnet_connectivity() {
-    log_section "Verifying Mainnet Connectivity"
-    
-    log_info "Testing RPC connectivity..."
-    
-    local RPC_URL="${ETHEREUM_RPC_URL}"
-    local CHAIN_ID="${CHAIN_ID:-1}"
-    
-    # Test RPC endpoint
-    local response=$(curl -s -X POST -H "Content-Type: application/json" \
-        --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-        "$RPC_URL" 2>/dev/null)
-    
-    if [ -z "$response" ]; then
-        log_error "RPC endpoint not responding"
-        exit 1
-    fi
-    
-    local block_number=$(echo "$response" | jq -r '.result' 2>/dev/null)
-    
-    if [ -z "$block_number" ] || [ "$block_number" = "null" ]; then
-        log_error "Failed to get block number from RPC"
-        exit 1
-    fi
-    
-    log_success "Connected to mainnet block: $block_number"
-    log_info "Chain ID: $CHAIN_ID"
-    
-    # Verify wallet balance
-    if [ -n "$TRADING_WALLET_ADDRESS" ]; then
-        local balance=$(curl -s -X POST -H "Content-Type: application/json" \
-            --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBalance\",\"params\":[\"$TRADING_WALLET_ADDRESS\",\"latest\"],\"id\":1}" \
-            "$RPC_URL" 2>/dev/null | jq -r '.result' 2>/dev/null)
-        
-        if [ -n "$balance" ] && [ "$balance" != "null" ]; then
-            local balance_eth=$(echo "scale=4; $balance / 1000000000000000000" | bc 2>/dev/null || echo "0")
-            log_success "Trading wallet balance: ${balance_eth} ETH"
-        fi
-    fi
-}
-
-# Deploy smart contracts to mainnet
-deploy_contracts() {
-    log_section "Deploying Smart Contracts to Mainnet"
-    
-    log_info "Installing contract dependencies..."
-    cd "${SCRIPT_DIR}/contracts"
-    npm install --silent
-    
-    log_info "Compiling contracts..."
-    forge compile --silent
-    
-    log_info "Deploying FlashLoanExecutor to mainnet..."
-    
-    local DEPLOYER_KEY="${TRADING_WALLET_PRIVATE_KEY}"
-    
-    if [ -z "$DEPLOYER_KEY" ]; then
-        log_error "TRADING_WALLET_PRIVATE_KEY not configured"
-        exit 1
-    fi
-    
-    # Deploy with proper mainnet settings
-    forge create --rpc-url "${ETHEREUM_RPC_URL}" \
-        --private-key "$DEPLOYER_KEY" \
-        --constructor-args \
-        $(echo "${AAVE_V3_POOL_ADDRESS:-0x87870Bca3FfcfD8cDBd647aD42c42b892F4Ad587}" | xargs) \
-        ./src/FlashLoanExecutor.sol:FlashLoanExecutor \
-        --broadcast --legacy \
-        > "${LOG_DIR}/deployment.log" 2>&1
-    
-    if [ $? -eq 0 ]; then
-        log_success "Contracts deployed to mainnet"
-    else
-        log_error "Contract deployment failed"
-        cat "${LOG_DIR}/deployment.log"
-        exit 1
-    fi
-    
-    cd "${SCRIPT_DIR}"
-}
-
-# Configure trading engine for production
-configure_trading_engine() {
-    log_section "Configuring Production Trading Engine"
-    
-    cat > "${CONFIG_DIR}/trading_config.json" << CONFIG_EOF
-{
-    "blockchain": {
-        "network": "${BLOCKCHAIN_NETWORK:-ethereum}",
-        "rpc_url": "${ETHEREUM_RPC_URL}",
-        "chain_id": ${CHAIN_ID:-1},
-        "confirmations": 1,
-        "gas_price_gwei": ${GAS_PRICE_GWEI:-30},
-        "max_gas_price_gwei": ${MAX_GAS_PRICE_GWEI:-150}
-    },
-    "trading": {
-        "loan_amount_usd": ${LOAN_AMOUNT_USD:-75000},
-        "max_loan_amount_usd": ${MAX_LOAN_AMOUNT_USD:-750000},
-        "max_position_size_usd": ${MAX_POSITION_SIZE_USD:-375000},
-        "min_profit_threshold_usd": ${MIN_PROFIT_THRESHOLD_USD:-200},
-        "max_concurrent_trades": ${MAX_CONCURRENT_TRADES:-15},
-        "strategy": "${TRADING_STRATEGY:-aggressive}",
-        "test_mode": false,
-        "simulate_trades": false,
-        "auto_execute": true,
-        "trading_enabled": true,
-        "scan_interval_seconds": 1,
-        "max_daily_trades": 100
-    },
-    "risk_management": {
-        "max_daily_loss_usd": ${MAX_DAILY_LOSS_USD:-75000},
-        "max_loss_per_trade_usd": ${MAX_LOSS_PER_TRADE_USD:-1000},
-        "stop_loss_percentage": ${STOP_LOSS_PERCENTAGE:-3},
-        "take_profit_percentage": ${TAKE_PROFIT_PERCENTAGE:-10},
-        "max_drawdown_percentage": ${MAX_DRAWDOWN_PERCENTAGE:-15},
-        "max_daily_trades": ${MAX_DAILY_TRADES:-100},
-        "cooldown_period_seconds": ${COOLDOWN_PERIOD_SECONDS:-60}
-    },
-    "mev": {
-        "enabled": true,
-        "private_transactions": true,
-        "bundle_submission": true,
-        "use_flashbots": true,
-        "liquidations_enabled": true,
-        "sandwich_enabled": true,
-        "min_liquidation_reward": 50,
-        "max_gas_price": 150
-    },
-    "monitoring": {
-        "health_check_interval_seconds": 30,
-        "metrics_collection_interval_seconds": 60,
-        "alert_thresholds": {
-            "cpu_percent": 80,
-            "memory_percent": 85,
-            "disk_percent": 90
-        }
-    },
-    "flash_loans": {
-        "provider": "${FLASH_LOAN_PROVIDER:-aave_v3}",
-        "pool_address": "${AAVE_V3_POOL_ADDRESS}",
-        "max_loan_duration_seconds": 120,
-        "retry_attempts": 5,
-        "retry_delay_seconds": 2
-    },
-    "wallet": {
-        "address": "${TRADING_WALLET_ADDRESS}",
-        "network": "${BLOCKCHAIN_NETWORK}"
-    }
-}
-CONFIG_EOF
-    
-    log_success "Trading engine configured for PRODUCTION"
-}
-
-# Start trading engine
-start_trading_engine() {
-    log_section "Starting Production Trading Engine"
-    
-    log_info "Starting autonomous trading bot..."
-    
-    cd "${SCRIPT_DIR}"
-    
-    python3 src/main.py \
-        --config "${CONFIG_DIR}/trading_config.json" \
-        --log-dir "${LOG_DIR}" \
-        --data-dir "${DATA_DIR}" \
-        > "${LOG_DIR}/trading_engine.log" 2>&1 &
-    
-    TRADING_ENGINE_PID=$!
-    echo $TRADING_ENGINE_PID > "${DATA_DIR}/trading_engine.pid"
-    
-    log_success "Trading engine started (PID: $TRADING_ENGINE_PID)"
-    log_info "Waiting for engine to initialize..."
-    
-    sleep 5
-    
-    if kill -0 $TRADING_ENGINE_PID 2>/dev/null; then
-        log_success "Trading engine is running"
-    else
-        log_error "Trading engine failed to start"
-        cat "${LOG_DIR}/trading_engine.log"
-        exit 1
-    fi
-}
-
-# Generate deployment report
-generate_report() {
-    log_section "Generating Deployment Report"
-    
-    local report_file="${LOG_DIR}/deployment_report_$(date +%Y%m%d_%H%M%S).md"
-    
-    cat > "$report_file" << REPORT_EOF
-# Production Deployment Report
-## Timestamp
-$(date '+%Y-%m-%d %H:%M:%S')
-
-## Environment
-- **Network**: Mainnet (${BLOCKCHAIN_NETWORK:-ethereum})
-- **RPC URL**: ${ETHEREUM_RPC_URL}
-- **Chain ID**: ${CHAIN_ID:-1}
-- **Script Directory**: ${SCRIPT_DIR}
-
-## Trading Configuration
-- **Loan Amount**: ${LOAN_AMOUNT_USD:-10000} USD
-- **Max Loan**: ${MAX_LOAN_AMOUNT_USD:-100000} USD
-- **Strategy**: ${TRADING_STRATEGY:-balanced}
-- **Test Mode**: DISABLED (Production)
-- **Auto Execute**: ENABLED
-
-## System Status
-- **Trading Engine**: Running (PID: ${TRADING_ENGINE_PID})
-- **Trading Enabled**: YES
-- **Flash Loans**: ACTIVE
-
-## Configuration Files
-- **Trading Config**: ${CONFIG_DIR}/trading_config.json
-- **Wallet**: ${TRADING_WALLET_ADDRESS}
-
-## Logs
-- Trading Engine: ${LOG_DIR}/trading_engine.log
-- Deployment: ${LOG_DIR}/deployment.log
-
-## Next Steps
-1. Monitor system health continuously
-2. Review trading logs regularly
-3. Check transaction history on mainnet
-4. Analyze performance metrics
-5. Monitor gas prices for optimal execution
-
-REPORT_EOF
-    
-    log_success "Report generated: $report_file"
-    cat "$report_file"
-}
-
-# Main execution
 main() {
-    log_section "Autonomous Flash Loan Trading System - Mainnet Production"
+    clear
+    echo -e "${CYAN}"
+    echo "╔══════════════════════════════════════════════════════════════════╗"
+    echo "║           🚀 POWERSAVER - AVTONOMNI TRGOVALNI BOT 🚀          ║"
+    echo "╚══════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
     
-    log_info "Starting production deployment..."
-    log_info "Working directory: ${SCRIPT_DIR}"
+    # Preveri .env
+    if [ ! -f .env ]; then
+        log_error "Manjka .env datoteka!"
+        echo ""
+        echo "Ustvari .env z naslednjimi podatki:"
+        echo ""
+        cat .env.example
+        echo ""
+        exit 1
+    fi
     
-    # Execute deployment steps
-    check_prerequisites
-    setup_directories
-    load_environment
-    install_ethereum_node
-    verify_mainnet_connectivity
-    deploy_contracts
-    configure_trading_engine
-    start_trading_engine
-    generate_report
+    # Preveri če so podatki vneseni
+    if grep -qE "YOUR_|REPLACE|example" .env 2>/dev/null; then
+        log_error ".env ni pravilno nastavljen!"
+        echo ""
+        echo "Odpri .env in zamenjaj YOUR_... z resničnimi vrednostmi!"
+        exit 1
+    fi
     
-    log_section "Production Deployment Complete!"
-    
-    log_success "System is now running on MAINNET!"
-    log_info "Network: ${BLOCKCHAIN_NETWORK:-ethereum}"
-    log_info "Trading Engine: PID ${TRADING_ENGINE_PID}"
-    log_info "Logs: ${LOG_DIR}"
-    log_info "Data: ${DATA_DIR}"
-    log_info "Config: ${CONFIG_DIR}"
-    
-    echo -e "\n${GREEN}========================================${NC}"
-    echo -e "${GREEN}To monitor the system, run:${NC}"
-    echo -e "${YELLOW}  tail -f ${LOG_DIR}/trading_engine.log${NC}"
-    echo -e "${GREEN}To stop the system, run:${NC}"
-    echo -e "${YELLOW}  ./stop.sh${NC}"
-    echo -e "${GREEN}========================================${NC}\n"
-    
-    log_info "System running. Press Ctrl+C to stop."
-    wait
+    # Zaženi namestitev in trading
+    install_dependencies
+    setup_node
+    start_trading
 }
 
-# Run main function
+# ============================================================================
+# NAMESTITEV ODVISNOSTI
+# ============================================================================
+
+install_dependencies() {
+    log_info "1/3 Namestam odvisnosti..."
+    
+    # Python
+    if ! command -v python3 &>/dev/null; then
+        log_error "Manjka Python3!"
+        exit 1
+    fi
+    
+    # pip
+    pip3 install -r requirements.txt -q 2>/dev/null || pip install -r requirements.txt -q 2>/dev/null || true
+    
+    # Foundry (če še ni)
+    if ! command -v forge &>/dev/null; then
+        log_info "Namestam Foundry..."
+        curl -L https://foundry.paradigm.xyz | bash
+        source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null
+        foundryup 2>/dev/null || true
+    fi
+    
+    log_success "Odvisnosti nameščene"
+}
+
+# ============================================================================
+# NASTAVITEV NODE-A
+# ============================================================================
+
+setup_node() {
+    log_info "2/3 Nastavljam Ethereum node..."
+    
+    # Preveri ali že teče node
+    if curl -s -X POST -H "Content-Type: application/json" \
+        --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+        http://localhost:8545 2>/dev/null | grep -q result; then
+        log_success "Node že teče (localhost:8545)"
+        return 0
+    fi
+    
+    # Preveri RPC v .env
+    source .env
+    
+    if [ -n "$ETHEREUM_RPC_URL" ] && [ "$ETHEREUM_RPC_URL" != "http://localhost:8545" ]; then
+        log_success "Uporabljam zunanji RPC: ${ETHEREUM_RPC_URL:0:40}..."
+        return 0
+    fi
+    
+    # Namesti in zaženi Reth
+    log_info "Namestam Reth node (najhitrejši)..."
+    
+    ARCH=$(uname -m)
+    [ "$ARCH" = "x86_64" ] && ARCH="x86_64" || ARCH="aarch64"
+    
+    cd /tmp
+    if curl -fsSL "https://github.com/paradigmxyz/reth/releases/download/v0.2.0/reth-v0.2.0-${ARCH}-unknown-linux-gnu.tar.gz" -o reth.tar.gz; then
+        sudo tar -xzf reth.tar.gz -C /usr/local/bin --overwrite 2>/dev/null
+        rm reth.tar.gz
+        
+        if command -v reth &>/dev/null; then
+            log_info "Zaženjam Reth (light mode)..."
+            mkdir -p ~/.reth
+            nohup reth node \
+                --chain mainnet \
+                --datadir ~/.reth \
+                --light \
+                --http \
+                --http.api eth,net,debug,trace \
+                --http.vhosts=* \
+                --http.corsdomain=* \
+                > ~/.reth.log 2>&1 &
+            
+            # Čakaj da se zažene
+            sleep 5
+            
+            # Preveri če teče
+            if curl -s -X POST -H "Content-Type: application/json" \
+                --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                http://localhost:8545 2>/dev/null | grep -q result; then
+                log_success "Reth teče na http://localhost:8545"
+            else
+                log_warning "Reth se ni zagnal, uporabljam zunanji RPC"
+            fi
+        fi
+    else
+        log_warning "Reth ni na voljo, uporabljam zunanji RPC"
+    fi
+    
+    cd "$SCRIPT_DIR"
+}
+
+# ============================================================================
+# ZAGON TRADINGA
+# ============================================================================
+
+start_trading() {
+    log_info "3/3 ${GREEN}🚀 ZAŽENAM AVTONOMNEGA BOTA!${NC}"
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════════╗"
+    echo "║                    🤖 BOT TEČE 24/7 🤖                        ║"
+    echo "╠══════════════════════════════════════════════════════════════════╣"
+    echo "║  - Skenira priložnosti                                        ║"
+    echo "║  - Izvršuje posle                                            ║"
+    echo "║  - Upravlja tveganja                                         ║"
+    echo "║                                                                  ║"
+    echo "║  Za zaustavitev pritisni: Ctrl + C                            ║"
+    echo "╚══════════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    # Zaženi
+    python3 -m src.main --network mainnet
+}
+
+# Zagon
 main "$@"
