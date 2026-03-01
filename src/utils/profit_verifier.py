@@ -130,7 +130,7 @@ class RealTimeProfitCalculator:
         # Simulate price fetch (in production, connect to real oracle)
         # Real data only
         base_price = 1000.0 if token == "ETH" else 1.0
-        price = await self._get_real_price(token)
+        price = await self._get_token_price(token)
         
         self.price_cache[cache_key] = price
         return price
