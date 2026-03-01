@@ -1,7 +1,8 @@
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config();
 
-const privateKey = process.env.PRIVATE_KEY || process.env.TRADING_WALLET_PRIVATE_KEY;
+const pk = process.env.PRIVATE_KEY || process.env.TRADING_WALLET_PRIVATE_KEY;
+const sepoliaUrl = process.env.SEPOLIA_RPC_URL || "https://sepolia.infura.io/v3/7a6465e870ad43b19e62011d8947c2bd";
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -9,12 +10,12 @@ module.exports = {
   networks: {
     mainnet: {
       url: process.env.ETHEREUM_RPC_URL || "http://localhost:8545",
-      accounts: privateKey ? [privateKey] : [],
+      accounts: pk ? [pk] : [],
       chainId: 1,
     },
     sepolia: {
-      url: process.env.SEPOLIA_RPC_URL || "https://sepolia.infura.io/v3/" + process.env.INFURA_PROJECT_ID,
-      accounts: privateKey ? [privateKey] : [],
+      url: sepoliaUrl,
+      accounts: pk ? [pk] : [],
       chainId: 11155111,
     },
     localhost: {
