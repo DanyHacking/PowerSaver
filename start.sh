@@ -89,13 +89,13 @@ if [ "$ERIGON_RUNNING" = "false" ]; then
         -p 8545:8545 -p 8546:8546 -p 30303:30303 \
         -v erigon-data:/erigon \
         erigontech/erigon:latest \
-        --prune=prune --chain=mainnet \
+        --chain=mainnet \
         --http.vaddr=0.0.0.0:8545 \
         --ws.vaddr=0.0.0.0:8546 \
         --http.api=eth,debug,net,trace,web3 \
         --http.corsdomain="*" \
         --maxpeers=100 \
-        --snapshot.algobase="fast" 2>&1 || echo "   ❌ Napaka pri zagonu Erigona"
+        --prune.mode=prune 2>&1 || echo "   ❌ Napaka pri zagonu Erigona"
     
     # Čakaj na sync
     echo ""

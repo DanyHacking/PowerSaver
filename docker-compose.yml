@@ -233,7 +233,7 @@ volumes:
       - ERIGON_SNAPSHOT=fast
     volumes:
       - erigon-data:/erigon
-    command: --prune=prune
+    command: --prune.mode=prune
 
 volumes:
   erigon-data:
