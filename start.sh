@@ -88,7 +88,7 @@ if [ "$ERIGON_RUNNING" = "false" ]; then
         --restart unless-stopped \
         -p 8545:8545 -p 8546:8546 -p 30303:30303 \
         -v erigon-data:/erigon \
-        thorax/erigon:latest \
+        erigontech/erigon:latest \
         --prune=prune --chain=mainnet \
         --http.vaddr=0.0.0.0:8545 \
         --ws.vaddr=0.0.0.0:8546 \

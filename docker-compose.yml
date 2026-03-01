@@ -217,7 +217,7 @@ volumes:
   redis_data:
   # ======================== ETHEREUM NODE (ERIGON) ========================
   erigon:
-    image: thorax/erigon:latest
+    image: erigontech/erigon:latest
     container_name: erigon-node
     restart: unless-stopped
     ports:
