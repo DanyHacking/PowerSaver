@@ -1,0 +1,52 @@
+{
+    "network": "mainnet",
+    "testnet": false,
+    
+    "mainnet": {
+        "chain_id": 1,
+        "rpc_url": "http://localhost:8545",
+        "explorer": "https://etherscan.io",
+        
+        "tokens": ["ETH", "WETH", "USDC", "USDT", "DAI", "WBTC", "LINK", "UNI", "AAVE", "CRV", "SUSHI", "SNX", "COMP", "MKR", "MATIC", "LDO", "OP", "ARB", "STETH", "RETH", "GMX", "RNDR"],
+        
+        "exchanges": [
+            {"name": "uniswap_v3", "type": "uniswap_v3", "fee_tiers": [500, 3000, 10000]},
+            {"name": "uniswap_v2", "type": "uniswap_v2"},
+            {"name": "sushiswap", "type": "uniswap_v2"},
+            {"name": "curve", "type": "curve"},
+            {"name": "balancer", "type": "balancer"}
+        ],
+        
+        "contracts": {
+            "uniswap_v3_factory": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+            "uniswap_v3_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+            "uniswap_v2_factory": "0x5C69bEe701ef814a2B6fe3cF77eE1eD5e2b3f2c4",
+            "uniswap_v2_router": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+            "aave_v3_pool": "0x87870Bca3F3fD6335C3F4ce6260135144110A857",
+            "aave_v3_data_provider": "0x7ba7A4b98d51e89c8A5C4b3eD3A5A4b2C1E9f8D7"
+        }
+    },
+    
+    "testnet": {
+        "chain_id": 11155111,
+        "rpc_url": "https://sepolia.infura.io/v3/YOUR_KEY",
+        "explorer": "https://sepolia.etherscan.io",
+        
+        "tokens": ["ETH", "WETH", "USDC", "DAI"],
+        
+        "exchanges": [
+            {"name": "uniswap_v3_sepolia", "type": "uniswap_v3", "fee_tiers": [3000]},
+            {"name": "uniswap_v2_sepolia", "type": "uniswap_v2"}
+        ],
+        
+        "contracts": {
+            "uniswap_v3_factory": "0x0227628f3F023bb0B980b67D528571c17c2A5F34",
+            "uniswap_v3_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+            "uniswap_v2_factory": "0x7E25D212D7A7B6d79a3D5f5E6B5D8C4A9F2E1D0B",
+            "uniswap_v2_router": "0xB4FB5719D2D0fB4C2E50D0F4F1E2D3C4B5A6F7E8",
+            "weth": "0x7b79995e5f793A07Bc00C21412e50Ecae098E7f9",
+            "usdc": "0xda9d4f9b6ac7d4a1a7d1b4c3e5f8a2d9c8b7a6",
+            "dai": "0x5912f6616c84024cD1c0C2588fC0F07c8A4F4c8"
+        }
+    }
+}
