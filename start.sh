@@ -49,10 +49,13 @@ main() {
     fi
     
     # Preveri če so podatki vneseni
-    if grep -qE "YOUR_|REPLACE|example" .env 2>/dev/null; then
+    if ! grep -qE "^TRADING_WALLET_PRIVATE_KEY=0x[a-fA-F0-9]{64}" .env 2>/dev/null; then
         log_error ".env ni pravilno nastavljen!"
         echo ""
-        echo "Odpri .env in zamenjaj YOUR_... z resničnimi vrednostmi!"
+        echo "Odpri .env in nastavi:"
+        echo "  - TRADING_WALLET_PRIVATE_KEY"
+        echo "  - TRADING_WALLET_ADDRESS"  
+        echo "  - ETHEREUM_RPC_URL"
         exit 1
     fi
     
