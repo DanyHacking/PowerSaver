@@ -1,3 +1,6 @@
+import sys
+sys.setrecursionlimit(10000)
+
 """
 Autonomous Flash Loan Trading System - Main Entry Point
 Advanced DeFi arbitrage with profit verification and 24/7 reliability

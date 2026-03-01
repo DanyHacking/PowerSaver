@@ -3,7 +3,9 @@ COMPLETE AUTONOMOUS TRADING SYSTEM - Full Implementation
 All advanced features: multi-threaded execution, dynamic sizing, market analysis, backtesting, A/B testing, gas optimization, multi-chain, AI predictions, portfolio rebalancing
 """
 
+import sys
 import asyncio
+sys.setrecursionlimit(10000)
 import logging
 from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass, field

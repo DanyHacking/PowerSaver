@@ -1,107 +1,157 @@
 #!/bin/bash
 set -e
+
 cd "$(dirname "$0")"
+PROJECT_DIR=$(pwd)
 
 echo "🚀 POWERSAVER - AVTONOMNI TRGOVALNI BOT"
 echo "=========================================="
 
-# Auto-install dependencies
+# ============================================
+# KORAK 1: Namesti odvisnosti
+# ============================================
+echo "📦 Namestam Python odvisnosti..."
 pip3 install -q python-dotenv web3 eth-account 2>/dev/null || true
+echo "✅ Odvisnosti nameščene"
 
-# Check if Erigon is already running
+# ============================================
+# KORAK 2: Preveri in zaženi Docker/Erigon
+# ============================================
+echo ""
+echo "🔧 Preverjam Ethereum node (Erigon)..."
+
+# Preveri če Erigon že teče
 ERIGON_RUNNING=false
+ERIGON_BLOCK="0x0"
+
 if curl -s -X POST -H "Content-Type: application/json" \
    --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-   http://localhost:8545 >/dev/null 2>&1; then
+   http://localhost:8545 2>/dev/null | grep -q '"result"'; then
     ERIGON_RUNNING=true
-    echo "✅ Erigon node že teče!"
+    ERIGON_BLOCK=$(curl -s -X POST -H "Content-Type: application/json" \
+       --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+       http://localhost:8545 | grep -o '"result":"[^"]*"' | cut -d'"' -f4)
+    echo "✅ Erigon že teče! Block: $ERIGON_BLOCK"
 fi
 
-# Start Erigon if not running
+# Če Erigon ne teče, ga zaženi
 if [ "$ERIGON_RUNNING" = "false" ]; then
-    echo "🔧 Začenjam Erigon node..."
+    echo "📥 Začenjam Erigon node (prvi sync traja dlje)..."
     
-    # Check if docker-compose erigon service exists
-    if docker-compose ps erigon 2>/dev/null | grep -q "Up"; then
-        echo "✅ Erigon container že dela"
-    else
-        # Start Erigon container
-        docker-compose up -d erigon || {
-            echo "❌ Napaka pri zagonu Erigona"
-            echo "   Poskusam z docker run..."
-            docker run -d --name erigon-node \
-                -p 8545:8545 -p 8546:8546 -p 30303:30303 \
-                -v erigon-data:/erigon \
-                thorax/erigon:latest \
-                --prune=prune --chain=mainnet \
-                --http.vaddr=0.0.0.0:8545 \
-                --ws.vaddr=0.0.0.0:8546 \
-                --http.api=eth,debug,net,trace,web3
-        }
+    # Preveri docker volume
+    if ! docker volume ls | grep -q erigon-data; then
+        echo "   Ustvarjam Docker volume..."
+        docker volume create erigon-data 2>/dev/null || true
     fi
     
-    echo "⏳ Čakam da se Erigon sync-a..."
-    echo "   (To lahko traja več ur/dni - prvi sync je najdaljši)"
+    # Zaženi Erigon container
+    echo "   Začenjam container..."
+    docker rm -f erigon-node 2>/dev/null || true
+    
+    docker run -d --name erigon-node \
+        --restart unless-stopped \
+        -p 8545:8545 -p 8546:8546 -p 30303:30303 \
+        -v erigon-data:/erigon \
+        thorax/erigon:latest \
+        --prune=prune --chain=mainnet \
+        --http.vaddr=0.0.0.0:8545 \
+        --ws.vaddr=0.0.0.0:8546 \
+        --http.api=eth,debug,net,trace,web3 \
+        --http.corsdomain="*" \
+        --maxpeers=100 \
+        --snapshot.algobase="fast" 2>/dev/null || true
+    
+    # Čakaj na sync
+    echo ""
+    echo "⏳ Čakam na Erigon sync..."
+    echo "   (Prvi sync = ~100GB, lahko traja ure/dnevi)"
+    echo "   Brez panike - to je normalno!"
     echo ""
     
-    # Wait for Erigon with progress
     SYNCED=false
-    for i in {1..3600}; do  # 5 hours max wait
-        if curl -s -X POST -H "Content-Type: application/json" \
+    LAST_BLOCK="0x0"
+    
+    for i in $(seq 1 3600); do  # 5 ur max
+        sleep 5
+        
+        RESP=$(curl -s -X POST -H "Content-Type: application/json" \
            --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-           http://localhost:8545 >/dev/null 2>&1; then
+           http://localhost:8545 2>/dev/null || echo "")
+        
+        if echo "$RESP" | grep -q '"result"'; then
+            BLOCK=$(echo "$RESP" | grep -o '"result":"[^"]*"' | cut -d'"' -f4)
             
-            # Get current block
-            BLOCK=$(curl -s -X POST -H "Content-Type: application/json" \
-                --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-                http://localhost:8545 | grep -o '"result":"0x[^"]*"' | cut -d'"' -f4)
-            
-            if [ -n "$BLOCK" ]; then
-                echo "✅ Erigon SYNCD! Block: $BLOCK"
-                SYNCED=true
-                break
+            if [ "$BLOCK" != "0x0" ] && [ -n "$BLOCK" ]; then
+                # Pretvori v decimalno za primerjavo
+                BLOCK_DEC=$((16#$BLOCK))
+                
+                if [ $BLOCK_DEC -gt 0 ]; then
+                    LAST_BLOCK=$BLOCK
+                    SYNCED=true
+                    
+                    # Show progress every 30 seconds
+                    if [ $((i % 6)) -eq 0 ]; then
+                        echo "   📊 Block: $BLOCK ($BLOCK_DEC)"
+                    fi
+                fi
             fi
         fi
         
-        if [ $((i % 30)) -eq 0 ]; then
-            echo "   Še vedno syncam... ($i/3600)"
+        # Če je synced več kot 10 checkov zapored, končaj
+        if [ "$SYNCED" = "true" ]; then
+            break
         fi
-        sleep 10
     done
     
-    if [ "$SYNCED" = "false" ]; then
-        echo "⚠️  Erigon še ni synced, ampak nadaljujem z zagonom bota..."
-        echo "   (Bot bo deloval z javnim RPC dokler se Erigon ne synca)"
+    if [ "$SYNCED" = "true" ]; then
+        echo ""
+        echo "✅ Erigon SYNCD! Block: $LAST_BLOCK"
+    else
+        echo ""
+        echo "⚠️  Erigon še ni synced (Block: $LAST_BLOCK)"
+        echo "   Nadaljujem z botom - bo deloval ko se sync-a"
     fi
 fi
 
-# Ensure .env exists
+# ============================================
+# KORAK 3: Nastavi .env
+# ============================================
+echo ""
+echo "🔐 Nastavljam .env..."
+
 if [ ! -f .env ]; then
     cp .env.example .env
+    echo "   Ustvarjen nov .env"
 fi
 
-# Use local Erigon RPC
-sed -i 's|ETHEREUM_RPC_URL=.*|ETHEREUM_RPC_URL=http://localhost:8545|g' .env 2>/dev/null || true
+# Vedno uporabi lokalni Erigon RPC
+sed -i 's|^ETHEREUM_RPC_URL=.*|ETHEREUM_RPC_URL=http://localhost:8545|g' .env 2>/dev/null || true
 if ! grep -q "^ETHEREUM_RPC_URL=" .env; then
     echo "ETHEREUM_RPC_URL=http://localhost:8545" >> .env
 fi
 
-# Load existing or generate wallet
+# Naloži spremenljivke
 source .env 2>/dev/null || true
 
-# Generate wallet if not configured
-if [ -z "$TRADING_WALLET_PRIVATE_KEY" ] || [ "$TRADING_WALLET_PRIVATE_KEY" == "0x0000" ]; then
-    echo "📋 Ustvarjam novo denarnico..."
+# ============================================
+# KORAK 4: Ustvari denarnico če je potrebno
+# ============================================
+if [ -z "$TRADING_WALLET_PRIVATE_KEY" ] || [ "$TRADING_WALLET_PRIVATE_KEY" = "" ] || [ "$TRADING_WALLET_PRIVATE_KEY" = "0x0000" ]; then
+    echo "💰 Ustvarjam novo denarnico..."
+    
     python3 << 'PYEOF'
 from eth_account import Account
 import os
 
 acct = Account.create()
+
+# Preberi obstoječ .env
 env_lines = []
 if os.path.exists('.env'):
     with open('.env', 'r') as f:
         env_lines = f.readlines()
 
+# Posodobi ali dodaj
 found_key = False
 found_addr = False
 new_lines = []
@@ -126,11 +176,18 @@ with open('.env', 'w') as f:
 
 print(f"✅ Nova denarnica ustvarjena!")
 print(f"   Naslov: {acct.address}")
+print(f"   ⚠️  SHRANI PRIVATE KEY: 0x{acct.key.hex()}")
 PYEOF
+else
+    echo "   ✅ Denarnica že nastavljena"
 fi
 
+# ============================================
+# KORAK 5: Zaženi bot
+# ============================================
 echo ""
 echo "🚀 Začenjam trading bot..."
+echo "=========================================="
 echo ""
 
 exec python3 -m src.main
