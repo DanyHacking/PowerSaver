@@ -3,11 +3,13 @@ Minimal configuration loader for trading system
 """
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from typing import Dict, Any
 
-# Load environment variables
-load_dotenv()
+# Load .env from project root
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 class Config:
     """Minimal configuration class"""
@@ -17,8 +19,8 @@ class Config:
     AAVE_PROVIDER_ADDRESS = os.getenv("AAVE_PROVIDER_ADDRESS", "0x2f39d218133AFaB8F2B819B1066c7E484DD26110")
     
     # Ethereum Network
-    RPC_URL = os.getenv("RPC_URL", "https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID")
-    PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
+    RPC_URL = os.getenv("ETHEREUM_RPC_URL") or os.getenv("RPC_URL", "https://rpc.ankr.com/eth")
+    PRIVATE_KEY = os.getenv("TRADING_WALLET_PRIVATE_KEY") or os.getenv("PRIVATE_KEY", "")
     CHAIN_ID = int(os.getenv("CHAIN_ID", "1"))
     
     # Trading Configuration
@@ -68,7 +70,7 @@ class Config:
         """Validate required configuration"""
         if not cls.PRIVATE_KEY:
             raise ValueError("PRIVATE_KEY is required")
-        if not cls.RPC_URL or "YOUR_INFURA_PROJECT_ID" in cls.RPC_URL:
+        if not cls.RPC_URL or cls.RPC_URL == "https://rpc.ankr.com/eth":
             raise ValueError("RPC_URL must be configured with valid Infura project ID")
         return True
 
