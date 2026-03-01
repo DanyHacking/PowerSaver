@@ -1,29 +1,27 @@
 /**
- * PowerSaver V3 Deployment
+ * PowerSaver V5 Deployment
  */
 const hre = require("hardhat");
 
 async function main() {
-  console.log("🚀 Deploying PowerSaver V3...\n");
+  console.log("🚀 Deploying PowerSaver V5...\n");
 
   const network = hre.network.name;
-  const poolAddress = network === "mainnet" 
-    ? "0x87870Bca3F3fD6335C3FbdC83E7a82f43aa0B2fE"  // Mainnet
-    : "0x6Ae43d3271ff6888e7Fc43Fd7321e5031dA2E2A"; // Sepolia
+  console.log(`Network: ${network}\n`);
 
-  console.log(`Network: ${network}`);
-  console.log(`Aave Pool: ${poolAddress}\n`);
-
-  const PowerSaver = await hre.ethers.getContractFactory("PowerSaverV3");
+  const PowerSaver = await hre.ethers.getContractFactory("PowerSaverV5");
   const contract = await PowerSaver.deploy();
   
   await contract.waitForDeployment();
   const addr = await contract.getAddress();
 
   console.log("✅ Deployed!");
-  console.log(`Address: ${addr}\n`);
-  
-  console.log(`📝 Next: npx hardhat verify --network ${network} ${addr}`);
+  console.log(`Address: ${addr}`);
+  console.log(`\nOwner: ${await contract.owner()}`);
+  console.log(`UniV2: ${await contract.uniV2()}`);
+  console.log(`UniV3: ${await contract.uniV3()}`);
+  console.log(`Sushi: ${await contract.sushi()}`);
+  console.log(`AavePool: ${await contract.aavePool()}`);
 }
 
 main().catch(console.error);
