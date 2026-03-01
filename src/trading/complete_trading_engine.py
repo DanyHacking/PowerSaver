@@ -242,6 +242,19 @@ class GasOptimizer:
     def __init__(self):
         self.gas_prices: List[float] = []
         self.max_history = 50
+
+    def _get_current_gas_price(self) -> float:
+        """Get current gas price from network"""
+        try:
+            from src.config_loader import get_config
+            cfg = get_config()
+            from web3 import Web3
+            w3 = Web3(Web3.HTTPProvider(cfg.RPC_URL))
+            if w3.is_connected():
+                return w3.eth.gas_price / 1e9
+        except:
+            pass
+        return 25.0
     
     async def optimize_gas(self, transaction: Dict) -> Dict:
         current_gas = self._get_current_gas_price()
