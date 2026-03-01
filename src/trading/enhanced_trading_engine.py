@@ -12,9 +12,9 @@ import time
 import json
 import random
 
-from utils.profit_verifier import ProfitGuard, OpportunityFilter, RealTimeProfitCalculator
-from utils.reliability_manager import ReliabilityManager, SystemHealth, RecoveryAction
-from risk_management.risk_manager import RiskManager
+from src.utils.profit_verifier import ProfitGuard, OpportunityFilter, RealTimeProfitCalculator
+from src.utils.reliability_manager import ReliabilityManager, SystemHealth, RecoveryAction
+from src.risk_management.risk_manager import RiskManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -10,8 +10,8 @@ import logging
 import argparse
 from pathlib import Path
 
-from config_loader import get_config, load_config
-from trading.complete_trading_engine import CompleteAutonomousTradingEngine, StrategyType
+from src.config_loader import get_config, load_config
+from src.trading.complete_trading_engine import CompleteAutonomousTradingEngine, StrategyType
 
 logging.basicConfig(
     level=logging.INFO,
