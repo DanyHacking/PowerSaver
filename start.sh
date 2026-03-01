@@ -8,6 +8,42 @@ echo "🚀 POWERSAVER - AVTONOMNI TRGOVALNI BOT"
 echo "=========================================="
 
 # ============================================
+# KORAK 0: Preveri in zaženi Docker
+# ============================================
+echo "🐳 Preverjam Docker..."
+
+# Preveri če docker API obstaja
+if ! docker info >/dev/null 2>&1; then
+    echo "   Docker ne teče, poskusim zagnati..."
+    
+    # Poskusi zagnati dockerd
+    sudo dockerd > /tmp/docker.log 2>&1 &
+    
+    # Čakaj da se Docker zažene
+    for i in {1..30}; do
+        if docker info >/dev/null 2>&1; then
+            echo "   ✅ Docker zagnan!"
+            break
+        fi
+        sleep 1
+    done
+    
+    # Če še ne teče, poskusi brez sudo
+    if ! docker info >/dev/null 2>&1; then
+        dockerd > /tmp/docker.log 2>&1 &
+        sleep 5
+    fi
+fi
+
+if ! docker info >/dev/null 2>&1; then
+    echo "❌ NAPAKA: Docker ne deluje!"
+    echo "   Namesti Docker: https://docs.docker.com/get-docker"
+    exit 1
+fi
+
+echo "✅ Docker teče!"
+
+# ============================================
 # KORAK 1: Namesti odvisnosti
 # ============================================
 echo "📦 Namestam Python odvisnosti..."
@@ -59,7 +95,7 @@ if [ "$ERIGON_RUNNING" = "false" ]; then
         --http.api=eth,debug,net,trace,web3 \
         --http.corsdomain="*" \
         --maxpeers=100 \
-        --snapshot.algobase="fast" 2>/dev/null || true
+        --snapshot.algobase="fast" 2>&1 || echo "   ❌ Napaka pri zagonu Erigona"
     
     # Čakaj na sync
     echo ""
