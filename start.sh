@@ -90,8 +90,8 @@ if [ "$ERIGON_RUNNING" = "false" ]; then
         -v erigon-data:/erigon \
         erigontech/erigon:latest \
         --chain=mainnet \
-        --http.vaddr=0.0.0.0:8545 \
-        --ws.vaddr=0.0.0.0:8546 \
+        --http.port=8545 \
+        --ws.port=8546 \
         --http.api=eth,debug,net,trace,web3 \
         --http.corsdomain="*" \
         --maxpeers=100 \
