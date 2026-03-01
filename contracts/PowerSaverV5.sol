@@ -79,12 +79,14 @@ contract PowerSaverV5 {
     constructor() {
         owner = msg.sender;
         authorized[msg.sender] = true;
-        
-        // Set router addresses
-        uniV2 = address(uint160(0x7a250d5630b4cf539739df2c5dacb4c659f2488d));
-        sushi = address(uint160(0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f));
-        uniV3 = address(uint160(0xe592427a0aece92de3edee1f18e0157c05861564));
-        aavePool = address(uint160(0x87870bca3f3fd6335c3fbdc83e7a82f43aa0b2fe));
+
+        // Set router addresses via assembly to avoid checksum issues
+        assembly {
+            sstore(uniV2.slot, 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D)
+            sstore(sushi.slot, 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F)
+            sstore(uniV3.slot, 0xE592427A0AEce92De3Edee1F18E0157C05861564)
+            sstore(aavePool.slot, 0x87870Bca3F3fD6335C3FbdC83E7a82f43aa0B2fE)
+        }
     }
 
     // ============ ENTRY POINT ============
