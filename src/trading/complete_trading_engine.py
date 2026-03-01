@@ -16,6 +16,7 @@ import random
 from src.utils.profit_verifier import ProfitGuard, OpportunityFilter, RealTimeProfitCalculator
 from src.utils.reliability_manager import ReliabilityManager, SystemHealth, RecoveryAction
 from src.risk_management.risk_manager import RiskManager
+from src.security import ContractSecurityValidator, VulnerabilityScanner, VulnerabilityLevel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -711,6 +712,9 @@ class CompleteAutonomousTradingEngine:
         })
         self.strategy_engine = StrategyEngine()
         self.backtester = BacktestingFramework(self.profit_guard)
+        # Security validator
+        self.security_validator = ContractSecurityValidator()
+        self.verified_contracts = set()
         
         self.supported_tokens = config.get("tokens", ["ETH", "USDC", "DAI"])
         self.supported_exchanges = config.get("exchanges", ["uniswap_v2", "uniswap_v3", "sushiswap"])
@@ -1089,3 +1093,64 @@ async def test_complete_system():
     print("\n" + "="*80)
 
 
+
+    # ============================================
+    # Security: Contract Validation
+    # ============================================
+    
+    async def _validate_contract_security(self, contract_address: str, source_code: str = None) -> bool:
+        """Validate a contract for security vulnerabilities before trading"""
+        if contract_address in self.verified_contracts:
+            return True
+            
+        try:
+            is_safe, result = await self.security_validator.validate_contract(contract_address, source_code)
+            
+            if is_safe:
+                self.verified_contracts.add(contract_address)
+                logger.info(f"✅ Contract {contract_address} validated - safe for trading")
+                return True
+            else:
+                logger.warning(f"⚠️ Contract {contract_address} has security issues:")
+                if result:
+                    for vuln in result.vulnerabilities:
+                        if vuln.level in [VulnerabilityLevel.CRITICAL, VulnerabilityLevel.HIGH]:
+                            logger.warning(f"   [{vuln.level.value}] {vuln.name}: {vuln.description}")
+                return False
+        except Exception as e:
+            logger.error(f"Security validation error for {contract_address}: {e}")
+            return False  # Fail secure - don't trade with unknown contracts
+    
+    async def scan_contract_for_attack(self, contract_address: str) -> dict:
+        """Public method to scan any contract"""
+        try:
+            from web3 import Web3
+            # Would need web3 instance - placeholder
+            scanner = VulnerabilityScanner()
+            result = await scanner.scan_bytecode_analysis(contract_address)
+            return {
+                "address": contract_address,
+                "vulnerabilities": len(result.vulnerabilities),
+                "is_safe": result.is_safe,
+                "details": result.vulnerabilities
+            }
+        except Exception as e:
+            logger.error(f"Scan error: {e}")
+            return {"error": str(e)}
+    
+    def get_security_report(self) -> dict:
+        """Get security validation report"""
+        return {
+            "verified_contracts": list(self.verified_contracts),
+            "security_validator_status": "active",
+            "scan_capabilities": [
+                "reentrancy",
+                "integer_overflow", 
+                "access_control",
+                "tx_origin",
+                "unprotected_eth",
+                "unchecked_calls",
+                "front_running",
+                "dos"
+            ]
+        }
