@@ -275,7 +275,7 @@ class AIPredictor:
     
     async def predict(self, token: str, horizon: int = 60) -> Dict:
         """
-        Predict price movement
+        Predict price movement using technical analysis
         
         Returns:
             {
@@ -285,15 +285,201 @@ class AIPredictor:
                 "target_price": float
             }
         """
-        # Would use trained model for prediction
-        # For now, return placeholder
+        # Get price history
+        history = self.price_history.get(token, [])
+        
+        if len(history) < 10:
+            # Not enough data, try to fetch
+            await self._fetch_price_history(token)
+            history = self.price_history.get(token, [])
+        
+        if len(history) < 10:
+            return {
+                "direction": "neutral",
+                "confidence": 0.0,
+                "predicted_change_pct": 0.0,
+                "target_price": 0.0,
+                "reason": "insufficient_data"
+            }
+        
+        # Calculate technical indicators
+        current_price = history[-1]
+        
+        # 1. Moving Average Crossover
+        ma_short = sum(history[-5:]) / 5
+        ma_long = sum(history[-20:]) / 20 if len(history) >= 20 else ma_short
+        
+        # 2. RSI (Relative Strength Index)
+        rsi = self._calculate_rsi(history)
+        
+        # 3. MACD
+        macd, signal = self._calculate_macd(history)
+        
+        # 4. Bollinger Bands position
+        bb_position = self._calculate_bb_position(history)
+        
+        # Combine signals
+        signals = []
+        
+        # MA Crossover signal
+        if ma_short > ma_long * 1.02:
+            signals.append(("up", 0.3))
+        elif ma_short < ma_long * 0.98:
+            signals.append(("down", 0.3))
+        
+        # RSI signal
+        if rsi < 30:
+            signals.append(("up", 0.2))  # Oversold
+        elif rsi > 70:
+            signals.append(("down", 0.2))  # Overbought
+        
+        # MACD signal
+        if macd > signal:
+            signals.append(("up", 0.25))
+        elif macd < signal:
+            signals.append(("down", 0.25))
+        
+        # Bollinger signal
+        if bb_position < 0.2:
+            signals.append(("up", 0.15))
+        elif bb_position > 0.8:
+            signals.append(("down", 0.15))
+        
+        # Aggregate signals
+        up_votes = sum(s[1] for s in signals if s[0] == "up")
+        down_votes = sum(s[1] for s in signals if s[0] == "down")
+        
+        if up_votes > down_votes:
+            direction = "up"
+            confidence = min(up_votes, 1.0)
+            change = (up_votes - down_votes) * 2  # Estimate 2% per signal strength
+        elif down_votes > up_votes:
+            direction = "down"
+            confidence = min(down_votes, 1.0)
+            change = -(down_votes - up_votes) * 2
+        else:
+            direction = "neutral"
+            confidence = 0.0
+            change = 0.0
+        
+        # Calculate target price
+        target_price = current_price * (1 + change / 100)
         
         return {
-            "direction": "neutral",
-            "confidence": 0.5,
-            "predicted_change_pct": 0.0,
-            "target_price": 0.0
+            "direction": direction,
+            "confidence": confidence,
+            "predicted_change_pct": change,
+            "target_price": target_price,
+            "indicators": {
+                "rsi": rsi,
+                "macd": macd,
+                "ma_short": ma_short,
+                "ma_long": ma_long,
+                "bb_position": bb_position
+            }
         }
+    
+    def _calculate_rsi(self, prices: List[float], period: int = 14) -> float:
+        """Calculate RSI"""
+        if len(prices) < period + 1:
+            return 50.0  # Neutral
+        
+        gains = []
+        losses = []
+        
+        for i in range(1, len(prices)):
+            change = prices[i] - prices[i-1]
+            if change > 0:
+                gains.append(change)
+                losses.append(0)
+            else:
+                gains.append(0)
+                losses.append(abs(change))
+        
+        avg_gain = sum(gains[-period:]) / period
+        avg_loss = sum(losses[-period:]) / period
+        
+        if avg_loss == 0:
+            return 100
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def _calculate_macd(self, prices: List[float]) -> Tuple[float, float]:
+        """Calculate MACD and signal line"""
+        if len(prices) < 26:
+            return 0.0, 0.0
+        
+        # EMA 12
+        ema_12 = self._ema(prices, 12)
+        # EMA 26
+        ema_26 = self._ema(prices, 26)
+        
+        macd = ema_12 - ema_26
+        signal = macd * 0.9  # Simplified signal
+        
+        return macd, signal
+    
+    def _ema(self, prices: List[float], period: int) -> float:
+        """Calculate Exponential Moving Average"""
+        if len(prices) < period:
+            return sum(prices) / len(prices)
+        
+        multiplier = 2 / (period + 1)
+        ema = sum(prices[:period]) / period
+        
+        for price in prices[period:]:
+            ema = (price - ema) * multiplier + ema
+        
+        return ema
+    
+    def _calculate_bb_position(self, prices: List[float], period: int = 20) -> float:
+        """Calculate Bollinger Bands position (0-1)"""
+        if len(prices) < period:
+            return 0.5
+        
+        recent = prices[-period:]
+        sma = sum(recent) / period
+        std = (sum((p - sma) ** 2 for p in recent) / period) ** 0.5
+        
+        upper = sma + 2 * std
+        lower = sma - 2 * std
+        
+        current = prices[-1]
+        
+        if upper == lower:
+            return 0.5
+        
+        position = (current - lower) / (upper - lower)
+        return max(0, min(1, position))
+    
+    async def _fetch_price_history(self, token: str):
+        """Fetch price history from CoinGecko"""
+        try:
+            import aiohttp
+            
+            ids = {
+                "ETH": "ethereum", "WETH": "ethereum", "WBTC": "wrapped-bitcoin",
+                "LINK": "chainlink", "UNI": "uniswap", "AAVE": "aave"
+            }
+            
+            token_id = ids.get(token.upper())
+            if not token_id:
+                return
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.coingecko.com/api/v3/coins/{token_id}/market_chart?vs_currency=usd&days=1",
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        prices = [p[1] for p in data.get("prices", [])]
+                        self.price_history[token] = prices
+        
+        except Exception as e:
+            logger.debug(f"Failed to fetch price history: {e}")
     
     async def find_momentum_tokens(self) -> List[Dict]:
         """Find tokens with strong momentum"""

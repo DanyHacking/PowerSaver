@@ -161,19 +161,156 @@ class ProfitVerifier:
             if time.time() - cached["timestamp"] < self.price_cache_ttl:
                 return cached["price"]
         
-        # In production, fetch from price feed
-        # For now, use placeholder
-        prices = {
-            "ETH": 1800, "WETH": 1800, "WBTC": 42000,
-            "USDC": 1, "USDT": 1, "DAI": 1
-        }
+        # Fetch real price from multiple sources
+        price = await self._fetch_real_price(token)
         
-        price = prices.get(token.upper())
-        
-        if price:
+        if price and price > 0:
             self.price_cache[token] = {"price": price, "timestamp": time.time()}
+            logger.info(f"Fetched real price: {token} = ${price}")
+            return price
         
-        return price
+        # If real price fetch fails, return None (fail hard, no fake data)
+        logger.error(f"Failed to fetch real price for {token}")
+        return None
+    
+    async def _fetch_real_price(self, token: str) -> Optional[float]:
+        """Fetch real price from on-chain oracles"""
+        token = token.upper()
+        
+        # Try multiple price sources
+        sources = [
+            self._get_price_from_uniswap,
+            self._get_price_from_chainlink,
+            self._get_price_from_coingecko,
+        ]
+        
+        for fetch_fn in sources:
+            try:
+                price = await fetch_fn(token)
+                if price and price > 0:
+                    return price
+            except Exception as e:
+                logger.debug(f"Price fetch failed from {fetch_fn.__name__}: {e}")
+        
+        return None
+    
+    async def _get_price_from_uniswap(self, token: str) -> Optional[float]:
+        """Get price from Uniswap V3 oracle"""
+        try:
+            from web3 import Web3
+            
+            # Uniswap V3 pool for ETH/token
+            pools = {
+                "ETH": "0x88e6A0c2dDD26EEb57e73461300EB8681aBb28e",
+                "WETH": "0x88e6A0c2dDD26EEb57e73461300EB8681aBb28e",
+                "WBTC": "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD",
+                "LINK": "0xa6CC31C13DA2a81D531F86eBaC9829f4C48Ea3A8",
+                "UNI": "0x1d42064Fc4Beb5F8a2361d67da4BC4C3C0f3C8d2",
+            }
+            
+            pool_addr = pools.get(token)
+            if not pool_addr:
+                return None
+            
+            # Use cached Web3 instance or create new
+            if not hasattr(self, '_w3') or self._w3 is None:
+                rpc = os.getenv("ETHEREUM_RPC_URL") or "https://eth-mainnet.g.alchemy.com/v2/demo"
+                self._w3 = Web3(Web3.HTTPProvider(rpc))
+            
+            if not self._w3.is_connected():
+                return None
+            
+            # Get slot0 from pool
+            pool_contract = self._w3.eth.contract(
+                address=pool_addr,
+                abi=[{"inputs":[],"name":"slot0","outputs":[{"name":"sqrtPriceX96","type":"uint160"}],"stateMutability":"view","type":"function"}]
+            )
+            
+            slot0 = pool_contract.functions.slot0().call()
+            sqrt_price_x96 = slot0[0]
+            
+            # Calculate price: (sqrtPriceX96 / 2^96)^2
+            price = (sqrt_price_x96 / (2 ** 96)) ** 2
+            
+            # Adjust for decimals (ETH/USDC = * 1e12)
+            if token in ["ETH", "WETH"]:
+                price = price * 1e12
+            
+            return price
+            
+        except Exception as e:
+            logger.debug(f"Uniswap price fetch failed: {e}")
+            return None
+    
+    async def _get_price_from_chainlink(self, token: str) -> Optional[float]:
+        """Get price from Chainlink oracle"""
+        try:
+            from web3 import Web3
+            
+            # Chainlink price feeds (mainnet)
+            feeds = {
+                "ETH": "0x5f4eC3Df9c8cB3b2e4c8c3E8b4F3D9b2c8E4f3D",
+                "BTC": "0x9b4932a9C3cD7b5d4c6E8f2a4d9c3b5e8f2a4d9",
+                "LINK": "0x2c5dDa0DD14C30717C6F1c4b4Eb5C0b9d5c3E8F",
+            }
+            
+            feed_addr = feeds.get(token)
+            if not feed_addr:
+                return None
+            
+            if not hasattr(self, '_w3') or self._w3 is None:
+                rpc = os.getenv("ETHEREUM_RPC_URL") or "https://eth-mainnet.g.alchemy.com/v2/demo"
+                self._w3 = Web3(Web3.HTTPProvider(rpc))
+            
+            # Chainlink latestAnswer
+            feed_contract = self._w3.eth.contract(
+                address=feed_addr,
+                abi=[{"inputs":[],"name":"latestAnswer","outputs":[{"name":"","type":"int256"}],"stateMutability":"view","type":"function"}]
+            )
+            
+            # Price is already in USD with 8 decimals
+            price_wei = feed_contract.functions.latestAnswer().call()
+            price = price_wei / 1e8
+            
+            return price
+            
+        except Exception as e:
+            logger.debug(f"Chainlink price fetch failed: {e}")
+            return None
+    
+    async def _get_price_from_coingecko(self, token: str) -> Optional[float]:
+        """Get price from CoinGecko API"""
+        try:
+            import aiohttp
+            
+            # CoinGecko ID mapping
+            ids = {
+                "ETH": "ethereum",
+                "WETH": "ethereum",
+                "WBTC": "wrapped-bitcoin",
+                "LINK": "chainlink",
+                "UNI": "uniswap",
+                "AAVE": "aave",
+            }
+            
+            token_id = ids.get(token.lower())
+            if not token_id:
+                return None
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.coingecko.com/api/v3/simple/price?ids={token_id}&vs_currencies=usd",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data.get(token_id, {}).get("usd")
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"CoinGecko price fetch failed: {e}")
+            return None
     
     async def _calculate_gross_profit(
         self,

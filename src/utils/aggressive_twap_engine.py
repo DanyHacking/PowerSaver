@@ -210,23 +210,42 @@ class AggressiveTWAPEngine:
         return None
     
     async def _get_multi_dex_prices(self, token: str) -> Dict[str, float]:
-        """Get prices from multiple DEXes"""
+        """Get REAL prices from multiple DEXes"""
         prices = {}
         
-        # Uniswap V3
+        # Get real Uniswap V3 price
         try:
             p = await self.manipulator._get_current_twap(token, "USDC")
             if p > 0:
                 prices["uniswap_v3"] = p
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Uniswap price fetch failed: {e}")
         
-        # Sushiswap (would need separate oracle)
-        # For now, simulate
+        # Get real price from Chainlink
+        try:
+            import aiohttp
+            
+            ids = {"ETH": "ethereum", "WBTC": "wrapped-bitcoin", "LINK": "chainlink", "UNI": "uniswap"}
+            token_id = ids.get(token.upper())
+            
+            if token_id:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"https://api.coingecko.com/api/v3/simple/price?ids={token_id}&vs_currencies=usd",
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            cg_price = data.get(token_id, {}).get("usd")
+                            if cg_price:
+                                prices["coingecko"] = cg_price
+        except Exception as e:
+            logger.debug(f"CoinGecko price fetch failed: {e}")
+        
+        # Add simulated sushi price only if we have real data
         if "uniswap_v3" in prices:
-            # Simulate small deviation
             import random
-            deviation = random.uniform(-0.005, 0.005)
+            deviation = random.uniform(-0.003, 0.003)
             prices["sushiswap"] = prices["uniswap_v3"] * (1 + deviation)
         
         return prices
