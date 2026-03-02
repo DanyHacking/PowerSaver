@@ -269,7 +269,10 @@ class InclusionRateTest:
                 block_number=bundle["block"]
             )
             
-            if result.success:
+            # Handle both dict and object
+            is_included = result.get("included", False) if isinstance(result, dict) else getattr(result, "included", False)
+            
+            if is_included:
                 included += 1
             else:
                 failed += 1
