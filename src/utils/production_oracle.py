@@ -435,3 +435,61 @@ class OnChainOracle:
 def create_onchain_oracle(rpc_url: str, config: Dict = None) -> OnChainOracle:
     """Create production oracle instance"""
     return OnChainOracle(rpc_url, config)
+
+    # ============ ADDITIONAL PROFIT OPTIMIZATIONS ============
+    
+    def get_best_dex_price(self, token: str) -> Tuple[float, str]:
+        """
+        Get best price across all DEXes
+        Returns: (price, dex_name)
+        """
+        prices = self._source_prices.get(token.upper(), {})
+        
+        if not prices:
+            return 0.0, "none"
+        
+        best_price = max(prices.items(), key=lambda x: x[1])
+        return best_price[1], best_price[0]
+    
+    def get_arbitrage_opportunity(self, token_a: str, token_b: str) -> Optional[Dict]:
+        """
+        Find arbitrage opportunity between DEXes
+        Returns: {profit_pct, best_buy_dex, best_sell_dex}
+        """
+        prices_a = self._source_prices.get(token_a.upper(), {})
+        prices_b = self._source_prices.get(token_b.upper(), {})
+        
+        if not prices_a or not prices_b:
+            return None
+        
+        # Check each DEX pair
+        opportunities = []
+        for dex1, price1 in prices_a.items():
+            for dex2, price2 in prices_b.items():
+                if dex1 != dex2:
+                    # Calculate potential profit
+                    profit_pct = abs(price1 - price2) / min(price1, price2) * 100
+                    if profit_pct > 0.5:  # Only >0.5% opportunities
+                        opportunities.append({
+                            "profit_pct": profit_pct,
+                            "buy_dex": dex1 if price1 < price2 else dex2,
+                            "sell_dex": dex2 if price1 < price2 else dex1,
+                            "buy_price": min(price1, price2),
+                            "sell_price": max(price1, price2)
+                        })
+        
+        if opportunities:
+            return max(opportunities, key=lambda x: x["profit_pct"])
+        return None
+    
+    def calculate_networth(self, holdings: Dict[str, float]) -> float:
+        """
+        Calculate total portfolio networth in USD
+        holdings: {"ETH": 10.5, "USDC": 5000, ...}
+        """
+        total = 0.0
+        for token, amount in holdings.items():
+            price_data = self.get_price_cached(token)
+            if price_data:
+                total += price_data * amount
+        return total
