@@ -16,7 +16,7 @@ This is what safety_system SHOULD produce:
 import asyncio
 import time
 import json
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
 from enum import Enum
