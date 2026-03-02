@@ -61,13 +61,22 @@ class OnChainOracle:
         self._price_cache: Dict[str, OraclePrice] = {}
         self._cache_ttl = 30  # Max 30 seconds for any price
         
-        # TWAP buffers
+        # TWAP buffers with adaptive window selection
         self._twap_windows = {
             "1min": 60,
             "5min": 300,
             "15min": 900,
         }
         self._twap_data: Dict[str, Dict[str, deque]] = {}
+        
+        # Volatility tracking for adaptive windows
+        self._price_history: Dict[str, deque] = {}
+        self._volatility_threshold = 0.02  # 2% - switch window if exceeded
+        
+        # Profit-impacting features
+        self._price_bias: Dict[str, float] = {}  # Bias for directional trades
+        self._block_height = 0  # Track block for freshness
+        self._last_quote_time = 0  # For quote freshness
         
         # Multi-source prices
         self._source_prices: Dict[str, Dict[str, float]] = {}  # token -> {source: price}
@@ -308,8 +317,12 @@ class OnChainOracle:
         
         return min(1.0, source_score + agreement_score + freshness_score)
     
-    async def get_twap(self, token: str, window: str = "5min") -> Optional[float]:
-        """Get Time-Weighted Average Price"""
+    async def get_twap(self, token: str, window: str = None) -> Optional[float]:
+        """Get Time-Weighted Average Price with adaptive window"""
+        # Auto-select window if not specified
+        if window is None:
+            window = self._get_adaptive_twap_window(token)
+        
         if window not in self._twap_windows:
             window = "5min"
         
@@ -317,6 +330,78 @@ class OnChainOracle:
         # For now, return current price as approximation
         price = await self.get_price(token)
         return price.price_usd if price else None
+    
+    def _get_adaptive_twap_window(self, token: str) -> str:
+        """Select optimal TWAP window based on token volatility"""
+        # High volatility tokens need shorter TWAP
+        high_vol_tokens = {"WBTC", "LINK", "UNI", "AAVE", "MATIC"}
+        mid_vol_tokens = {"ETH", "WETH", "SOL"}
+        
+        token_upper = token.upper()
+        
+        if token_upper in high_vol_tokens:
+            return "1min"
+        elif token_upper in mid_vol_tokens:
+            return "5min"
+        else:
+            return "15min"
+    
+    def get_price_for_trade(self, token_in: str, token_out: str, amount: float) -> Optional[float]:
+        """
+        Get price optimized for a specific trade size
+        Accounts for slippage based on pool depth
+        """
+        price = self.get_price_cached(token_in)
+        if not price:
+            return None
+        
+        # Adjust for trade size impact
+        # Larger trades = more slippage = worse price
+        slippage_factor = self._estimate_slippage(token_in, token_out, amount)
+        
+        # Return price adjusted for expected slippage
+        return price * (1 + slippage_factor)
+    
+    def get_price_cached(self, token: str) -> Optional[float]:
+        """Get cached price without API call"""
+        if token in self._price_cache:
+            return self._price_cache[token].price_usd
+        return None
+    
+    def _estimate_slippage(self, token_in: str, token_out: str, amount: float) -> float:
+        """Estimate slippage based on trade size and pool reserves"""
+        # This would query actual pool reserves in production
+        # For now, use conservative estimate
+        # Rule of thumb: 1% slippage per 1% of pool
+        estimated_liquidity = 1_000_000  # Assume $1M liquidity
+        return min(amount / estimated_liquidity, 0.05)  # Cap at 5%
+    
+    def update_price_history(self, token: str, price: float):
+        """Update price history for volatility tracking"""
+        if token not in self._price_history:
+            self._price_history[token] = deque(maxlen=100)
+        self._price_history[token].append({"price": price, "timestamp": time.time()})
+    
+    def get_volatility(self, token: str) -> float:
+        """Calculate price volatility for adaptive decisions"""
+        if token not in self._price_history or len(self._price_history[token]) < 5:
+            return 0.0
+        
+        prices = [p["price"] for p in self._price_history[token][-20:]]
+        if not prices:
+            return 0.0
+        
+        mean = sum(prices) / len(prices)
+        variance = sum((p - mean) ** 2 for p in prices) / len(prices)
+        return (variance ** 0.5) / mean if mean > 0 else 0.0
+    
+    def should_use_twap(self, token: str) -> bool:
+        """Decide if TWAP should be used vs spot for more accurate execution"""
+        volatility = self.get_volatility(token)
+        
+        # High volatility = use TWAP to avoid slippage
+        # Low volatility = spot is fine
+        return volatility > self._volatility_threshold
     
     def get_health_status(self) -> Dict:
         """Get oracle health metrics"""
@@ -327,6 +412,7 @@ class OnChainOracle:
             "sources_available": {},
             "stale_tokens": [],
             "cache_hit_rate": 0.0,
+            "volatility": {},
         }
         
         for token, last_update in self._price_staleness.items():
@@ -337,6 +423,10 @@ class OnChainOracle:
         
         for token, sources in self._source_prices.items():
             status["sources_available"][token] = len(sources)
+        
+        # Add volatility data
+        for token in self._price_history:
+            status["volatility"][token] = self.get_volatility(token)
         
         return status
 
