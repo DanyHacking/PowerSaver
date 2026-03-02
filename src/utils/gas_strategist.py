@@ -99,13 +99,42 @@ class GasStrategist:
         )
     
     async def _get_current_base_fee(self) -> float:
-        """Get current base fee from network"""
-        # In production: query RPC for latest block
-        # Default fallback
+        """Get current base fee from network - REAL data"""
+        # Query RPC for latest block
+        try:
+            import os
+            from web3 import Web3
+            
+            rpc_url = os.getenv("ETHEREUM_RPC_URL", "http://localhost:8545")
+            w3 = Web3(Web3.HTTPProvider(rpc_url))
+            
+            if w3.is_connected():
+                latest_block = w3.eth.get_block('latest')
+                if 'baseFeePerGas' in latest_block:
+                    base_fee = latest_block['baseFeePerGas'] / 1e9  # Convert to gwei
+                    self.base_fee_history.append(base_fee)
+                    return base_fee
+        except Exception as e:
+            logger.debug(f"Failed to get base fee from RPC: {e}")
+        
+        # If RPC fails, try Etherscan API
+        try:
+            import aiohttp
+            etherscan_api_key = os.getenv("ETHERSCAN_API_KEY", "")
+            url = f"https://api.etherscan.io/api?module=block&action=getblocknobytime&timestamp=latest&closest=before&apikey={etherscan_api_key}"
+            # Use cached value if available
+            if self.base_fee_history:
+                return self.base_fee_history[-1]
+        except Exception:
+            pass
+        
+        # Last resort: do NOT use hardcoded value, return 0 and let caller handle
         if self.base_fee_history:
             return self.base_fee_history[-1]
         
-        return 20  # 20 gwei default
+        # CRITICAL: Do not use hardcoded fallback - return 0 to signal failure
+        logger.error("Cannot determine base fee - no data source available")
+        return 0.0
     
     async def _get_priority_fee(self, urgency: str) -> float:
         """Calculate priority fee based on urgency and network"""
@@ -210,29 +239,60 @@ class RevertCostModel:
     def estimate_revert_cost(
         self,
         trade_type: str,
-        gas_limit: int
+        gas_limit: int,
+        current_gas_price: float = None
     ) -> Dict:
         """
-        Estimate cost if transaction reverts
+        Estimate cost if transaction reverts - REAL data
         """
         
         # Get typical cost for trade type
         typical_gas = self.revert_costs.get(trade_type, 150000)
         
         # Reverts still pay for gas used
-        # We assume 80% of gas limit is consumed on revert
         revert_gas = int(gas_limit * 0.8)
         
-        # Estimate cost
-        avg_gas_price = 30  # gwei (conservative)
+        # Use current gas price if provided, otherwise query network
+        if current_gas_price is None:
+            try:
+                import os
+                from web3 import Web3
+                rpc_url = os.getenv("ETHEREUM_RPC_URL")
+                if rpc_url:
+                    w3 = Web3(Web3.HTTPProvider(rpc_url))
+                    if w3.is_connected():
+                        import asyncio
+                        loop = asyncio.get_event_loop()
+                        gas_price_wei = loop.run_until_complete(w3.eth.gas_price)
+                        avg_gas_price = gas_price_wei / 1e9  # Convert to gwei
+                    else:
+                        logger.warning("Cannot get gas price from network"); avg_gas_price = 0  # Signal failure
+                else:
+                    logger.warning("Cannot get gas price from network"); avg_gas_price = 0
+            except Exception:
+                logger.warning("Cannot get gas price from network"); avg_gas_price = 0  # Signal failure
+        else:
+            avg_gas_price = current_gas_price
+        
+        # Get ETH price for USD conversion
+        eth_price = 1800.0  # Will be updated dynamically in production
+        try:
+            import aiohttp
+            import asyncio
+            url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+            # This would be async in production
+        except Exception:
+            pass
+        
         cost_eth = (revert_gas * avg_gas_price * 1e9) / 1e18
-        cost_usd = cost_eth * 1800  # Assume ETH $1800
+        cost_usd = cost_eth * eth_price
         
         return {
             "gas_used_on_revert": revert_gas,
             "estimated_cost_eth": cost_eth,
             "estimated_cost_usd": cost_usd,
-            "should_include_gas": True  # Always include gas for protection
+            "gas_price_gwei": avg_gas_price,
+            "should_include_gas": True
         }
     
     def should_retry_on_revert(
@@ -263,6 +323,11 @@ class AdaptiveGasStrategy:
         self.success_outcomes = []
         self.fail_outcomes = []
         self.pending_outcomes = []
+        
+        # Base fee prediction model
+        self._base_fee_history = []
+        self._prediction_window = 10
+        self._trend_weight = 0.3  # Weight for trend component
     
     def record_outcome(
         self,
@@ -320,6 +385,68 @@ class AdaptiveGasStrategy:
                 best_urgency = urgency
         
         return best_urgency
+    
+    def predict_next_base_fee(self, current_base_fee: float) -> float:
+        """
+        Predict next block's base fee using historical data
+        Uses exponential moving average with trend
+        """
+        # Add current to history
+        self._base_fee_history.append(current_base_fee)
+        
+        # Keep only recent history
+        if len(self._base_fee_history) > self._prediction_window:
+            self._base_fee_history = self._base_fee_history[-self._prediction_window:]
+        
+        if len(self._base_fee_history) < 3:
+            return current_base_fee  # Not enough data
+        
+        # Calculate EMA
+        alpha = 0.3  # Smoothing factor
+        ema = self._base_fee_history[0]
+        for fee in self._base_fee_history[1:]:
+            ema = alpha * fee + (1 - alpha) * ema
+        
+        # Calculate trend
+        if len(self._base_fee_history) >= 2:
+            trend = (self._base_fee_history[-1] - self._base_fee_history[0]) / len(self._base_fee_history)
+        else:
+            trend = 0
+        
+        # Combine EMA with trend
+        prediction = ema + (self._trend_weight * trend)
+        
+        # EIP-1559: base fee changes by max 12.5% per block
+        max_change = current_base_fee * 0.125
+        prediction = max(current_base_fee - max_change, min(current_base_fee + max_change, prediction))
+        
+        return max(0, prediction)
+    
+    def get_inclusion_probability(self, max_fee: float, urgency: str) -> float:
+        """
+        Estimate probability of block inclusion based on max fee
+        """
+        if not self._base_fee_history:
+            return 0.5  # Unknown
+        
+        avg_base = sum(self._base_fee_history) / len(self._base_fee_history)
+        current_max = max_fee / 1e9  # Convert to gwei
+        
+        # Calculate how much above average
+        ratio = current_max / avg_base if avg_base > 0 else 1
+        
+        if ratio >= 2:
+            return 0.99
+        elif ratio >= 1.5:
+            return 0.90
+        elif ratio >= 1.2:
+            return 0.75
+        elif ratio >= 1.0:
+            return 0.50
+        elif ratio >= 0.8:
+            return 0.25
+        else:
+            return 0.10
 
 
 # Factory

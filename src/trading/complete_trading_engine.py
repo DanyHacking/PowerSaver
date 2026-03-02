@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import time
-import random
 
 from src.utils.profit_verifier import ProfitGuard, OpportunityFilter, RealTimeProfitCalculator
 from src.utils.reliability_manager import ReliabilityManager, SystemHealth, RecoveryAction
@@ -160,9 +159,9 @@ class MarketConditionAnalyzer:
                 # Get current gas price in Gwei
                 gas_price_wei = w3.eth.gas_price
                 return gas_price_wei / 1e9  # Convert to Gwei
-            return 30.0  # Default fallback
+            logger.warning("Cannot get gas price from RPC"); return 0.0  # Do not use fallback
         except:
-            return 30.0
+            return 0.0  # Signal failure - no fallback
     
     def _check_network_congestion(self) -> float:
         """Get REAL network congestion from block fullness"""

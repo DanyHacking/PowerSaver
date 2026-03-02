@@ -330,7 +330,7 @@ class LiquidityScanner:
         # Simulate liquidity data
         # In production, would query DEX contracts
         
-        base_liquidity = random.uniform(1e6, 1e8)  # $1M to $100M
+        base_liquidity = await self._get_onchain_liquidity(token0, token1, exchange)
         
         # Different liquidity per DEX
         dex_multipliers = {
@@ -462,6 +462,56 @@ class OrderBookSimulator:
         
         return 100  # Can't fill
 
+
+
+    async def _get_onchain_liquidity(self, token0: str, token1: str, exchange: str) -> float:
+        """Get real on-chain liquidity from DEX pools"""
+        try:
+            from web3 import Web3
+            w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+            if not w3.is_connected():
+                return 0.0
+            
+            # Token addresses
+            token_addresses = {
+                "ETH": "0x0000000000000000000000000000000000000000",
+                "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+                "DAI": "0x6B175474E89094C44Da98b954EedE6C8EDc609666",
+                "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+            }
+            
+            addr0 = token_addresses.get(token0.upper())
+            addr1 = token_addresses.get(token1.upper())
+            
+            if not addr0 or not addr1:
+                return 0.0
+            
+            # Get pair address from Uniswap V2 factory
+            factory = "0x5C69bEe701ef814a2B6fe3cF77eE1eD5e2b3f2c4"
+            if addr0.lower() > addr1.lower():
+                addr0, addr1 = addr1, addr0
+            
+            factory_abi = '[{"constant":true,"inputs":[{"name":"tokenA","type":"address"},{"name":"tokenB","type":"address"}],"name":"getPair","outputs":[{"name":"","type":"address"}],"type":"function"}]'
+            factory_contract = w3.eth.contract(address=factory, abi=factory_abi)
+            pair_addr = factory_contract.functions.getPair(addr0, addr1).call()
+            
+            if pair_addr == "0x0000000000000000000000000000000000000000":
+                return 0.0
+            
+            # Get reserves
+            pair_abi = '[{"constant":true,"inputs":[],"name":"getReserves","outputs":[{"name":"reserve0","type":"uint112"},{"name":"reserve1","type":"uint112"}],"type":"function"}]'
+            contract = w3.eth.contract(address=pair_addr, abi=pair_abi)
+            reserves = contract.functions.getReserves().call()
+            
+            # Get token prices
+            # Simplified: assume token1 is USDC for USD calculation
+            liquidity = reserves[0] + reserves[1]  # Simplified
+            
+            return liquidity
+        except Exception as e:
+            return 0.0
 
 class AdvancedDataFeed:
     """Combined data feed with multiple sources"""

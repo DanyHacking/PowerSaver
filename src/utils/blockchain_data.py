@@ -45,7 +45,7 @@ class PoolReserves:
 
 class CoinGeckoPriceOracle:
     """
-    CoinGecko API price oracle
+    CoinGecko API price oracle with CACHING
     Free tier: 10-30 calls/minute
     """
     
@@ -65,19 +65,29 @@ class CoinGeckoPriceOracle:
     
     def __init__(self, api_key: str = None):
         self.api_key = api_key
+        # CACHED price data with TTL
         self.price_cache: Dict[str, Tuple[float, float]] = {}  # (price, timestamp)
         self.cache_ttl = 30  # 30 seconds cache
+        
+        # Batch cache for multiple tokens
+        self._batch_cache: Dict[str, Dict[str, float]] = {}
+        self._batch_cache_time: float = 0
+        self._batch_cache_ttl: float = 30  # 30 seconds for batch
     
     async def get_token_price(self, token: str) -> Optional[TokenPrice]:
-        """Get current token price from CoinGecko"""
-        token_id = self.TOKEN_IDS.get(token)
-        if not token_id:
-            logger.warning(f"Unknown token: {token}")
-            return None
-        
-        # Check cache
+        """Get current token price from CoinGecko with CACHING"""
+        # Check cache first
         cache_key = token
         if cache_key in self.price_cache:
+            price, timestamp = self.price_cache[cache_key]
+            if time.time() - timestamp < self.cache_ttl:
+                return TokenPrice(
+                    token=token,
+                    price_usd=price,
+                    timestamp=timestamp,
+                    source="cache",
+                    confidence=1.0
+                )
             price, timestamp = self.price_cache[cache_key]
             if time.time() - timestamp < self.cache_ttl:
                 return TokenPrice(

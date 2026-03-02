@@ -231,7 +231,7 @@ class ArbitrageEngine:
                 gas_estimate = self.web3.eth.estimate_gas(tx_data)
                 gas_limit = int(gas_estimate * 1.2)  # 20% buffer
             except:
-                gas_limit = 500000  # Default fallback
+                gas_limit = 0  # No fallback - require real estimate; logger.warning("Cannot estimate gas")
             
             # Step 4: Get current gas prices
             latest_block = self.web3.eth.get_block('latest')
