@@ -39,6 +39,16 @@ class OnChainOracle:
     # SushiSwap Factory
     SUSHISWAP_FACTORY = "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2AC"
     
+    # Curve Finance (stable swaps)
+    CURVE_REGISTRY = "0x90E00ACe048caF2339c3447B0e1e50f54700F7F1"
+    CURVE_CRYPTO_REGISTRY = "0x8F942C20D0e49d5E0f3A5C6c1b3F0F5d5D5C6C1"
+    
+    # Balancer
+    BALANCER_VAULT = "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+    
+    # dYdX
+    DYDX_MARKET = "0x1e0447b19bb6ecfdae1bd4d023ecca50d1dc5be4"
+    
     # Token addresses (mainnet)
     TOKEN_ADDRESSES = {
         "ETH": "0x0000000000000000000000000000000000000000",
@@ -48,6 +58,14 @@ class OnChainOracle:
         "DAI": "0x6B175474E89094C44Da98b954EedE6C8EDc609666",
         "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
         "LINK": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+        # Curve specific
+        "CRV": "0xD533a949740bb3306d119CC777fa900bA034cd52",
+        "STETH": "0xae7ab96520DE3A18f5b31e0EbA30dA1D4E4ce32A",
+        "WSTETH": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0",
+        # Balancer
+        "BAL": "0xba100000625a3754423978a60c9317c58a424e3D",
+        # dYdX
+        "DYDX": "0x92D6C1e31e14520E676a6FCCf2C00c19887317d4",
     }
     
     # USD stablecoins (for price calculation)
