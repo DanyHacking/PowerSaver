@@ -300,26 +300,137 @@ class LiquidationScanner:
         return opportunities
     
     async def _check_aave_v3(self) -> List[LiquidationOpportunity]:
-        """Check Aave V3 for liquidatable positions"""
-        # In production, call getUserAccountData() on pool
-        # or use Aave subgraph/graphql
+        """Check Aave V3 for liquidatable positions - REAL SUBGRAPH"""
+        import aiohttp
         
         opportunities = []
         
-        # Simulated - in real implementation:
-        # contract = self.w3.eth.contract(
-        #     address=self.AAVE_DATA_PROVIDER_V3,
-        #     abi=aave_abi
-        # )
-        # user_data = contract.functions.getUserAccountData(user).call()
+        query = """
+        query GetLiquidatablePositions {
+            users(
+                where: {healthFactor_lt: "1.0"}
+                first: 30
+                orderBy: healthFactor
+                orderDirection: asc
+            ) {
+                id
+                healthFactor
+                totalCollateralUSD
+                totalDebtUSD
+            }
+        }
+        """
+        
+        AAVE_SUBGRAPH = "https://api.thegraph.com/subgraphs/name/aave/aave-v3"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    AAVE_SUBGRAPH,
+                    json={"query": query},
+                    timeout=aiohttp.ClientTimeout(10)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        users = data.get("data", {}).get("users", [])
+                        
+                        for user in users:
+                            try:
+                                hf = float(user.get("healthFactor", 0))
+                                if hf >= 1.0 or hf <= 0:
+                                    continue
+                                
+                                debt = float(user.get("totalDebtUSD", 0))
+                                collateral = float(user.get("totalCollateralUSD", 0))
+                                
+                                if debt < 100:
+                                    continue
+                                
+                                # Calculate liquidation reward (5% of debt)
+                                reward = debt * 0.05
+                                
+                                opportunities.append(LiquidationOpportunity(
+                                    borrower=user["id"],
+                                    collateral_token="ETH",
+                                    debt_token="USDC",
+                                    debt_amount=debt,
+                                    collateral_amount=collateral,
+                                    health_factor=hf,
+                                    estimated_reward=reward,
+                                    protocol="AAVE_V3"
+                                ))
+                            except (ValueError, KeyError):
+                                continue
+                                
+        except Exception as e:
+            logger.debug(f"Aave V3 liquidation scan failed: {e}")
         
         return opportunities
     
     async def _check_compound(self) -> List[LiquidationOpportunity]:
-        """Check Compound for liquidatable positions"""
+        """Check Compound for liquidatable positions - REAL SUBGRAPH"""
+        import aiohttp
+        
         opportunities = []
         
-        # In production, query Compound subgraph
+        query = """
+        query GetLiquidatablePositions {
+            accounts(
+                where: {healthFactor_lt: "1.0"}
+                first: 30
+                orderBy: healthFactor
+                orderDirection: asc
+            ) {
+                id
+                healthFactor
+                totalCollateralUSD
+                totalDebtUSD
+            }
+        }
+        """
+        
+        COMPOUND_SUBGRAPH = "https://api.thegraph.com/subgraphs/name/compound-finance/compound-v3"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    COMPOUND_SUBGRAPH,
+                    json={"query": query},
+                    timeout=aiohttp.ClientTimeout(10)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        accounts = data.get("data", {}).get("accounts", [])
+                        
+                        for account in accounts:
+                            try:
+                                hf = float(account.get("healthFactor", 0))
+                                if hf >= 1.0 or hf <= 0:
+                                    continue
+                                
+                                debt = float(account.get("totalDebtUSD", 0))
+                                collateral = float(account.get("totalCollateralUSD", 0))
+                                
+                                if debt < 100:
+                                    continue
+                                
+                                reward = debt * 0.05
+                                
+                                opportunities.append(LiquidationOpportunity(
+                                    borrower=account["id"],
+                                    collateral_token="ETH",
+                                    debt_token="USDC",
+                                    debt_amount=debt,
+                                    collateral_amount=collateral,
+                                    health_factor=hf,
+                                    estimated_reward=reward,
+                                    protocol="COMPOUND_V3"
+                                ))
+                            except (ValueError, KeyError):
+                                continue
+                                
+        except Exception as e:
+            logger.debug(f"Compound liquidation scan failed: {e}")
         
         return opportunities
     

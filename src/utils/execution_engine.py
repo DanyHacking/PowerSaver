@@ -1,6 +1,6 @@
 """
 High-Performance Execution Module
-- Ultra-fast liquidation detection
+- Ultra-fast liquidation detection (REAL)
 - Low-latency builder connection
 - Smart gas bidding
 - Dynamic flash loan sizing
@@ -9,8 +9,8 @@ High-Performance Execution Module
 import asyncio
 import logging
 import time
-import random
-from typing import Dict, List, Optional, Tuple
+import json
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import heapq
@@ -19,8 +19,39 @@ import hashlib
 import aiohttp
 from web3 import Web3
 from web3.eth import AsyncEth
+from eth_abi import encode
+from eth_typing import ChecksumAddress
 
 logger = logging.getLogger(__name__)
+
+
+# ===== REAL SUBGRAPH ENDPOINTS =====
+AAVE_V3_SUBGRAPH = "https://api.thegraph.com/subgraphs/name/aave/aave-v3"
+COMPOUND_V3_SUBGRAPH = "https://api.thegraph.com/subgraphs/name/compound-finance/compound-v3"
+AERODROME_SUBGRAPH = "https://api.thegraph.com/subgraphs/name/aerodrome/aerodrome-base"
+RADIANT_SUBGRAPH = "https://api.thegraph.com/subgraphs/name/radiant-capital/radiant-v2"
+
+
+async def query_subgraph(endpoint: str, query: str, variables: Dict = None) -> Optional[Dict]:
+    """Execute GraphQL query against subgraph"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {"query": query}
+            if variables:
+                payload["variables"] = variables
+            
+            async with session.post(
+                endpoint,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("data")
+                return None
+    except Exception as e:
+        logger.debug(f"Subgraph query failed: {e}")
+        return None
 
 
 class BuilderType(Enum):
@@ -148,107 +179,302 @@ class UltraFastLiquidations:
                 await asyncio.sleep(0.5)
     
     async def _scan_aave(self) -> List[LiquidationOpportunity]:
-        """Scan Aave V3 for liquidations"""
+        """Scan Aave V3 for liquidations - REAL SUBGRAPH QUERY"""
         opportunities = []
         
-        # In production:
-        # 1. Query Aave subgraph for unhealthy positions
-        # 2. Or listen to Aave events in real-time
-        # 3. Or use Aave V3 pool contract to check positions
+        query = """
+        query GetUnhealthyPositions($healthFactor: BigDecimal!) {
+            users(
+                where: {healthFactor_lt: $healthFactor}
+                first: 50
+                orderBy: healthFactor
+                orderDirection: asc
+            ) {
+                id
+                healthFactor
+                totalCollateralUSD
+                totalDebtUSD
+                reserves {
+                    underlyingAsset {
+                        symbol
+                        id
+                    }
+                    currentATokenBalance
+                    currentStableDebt
+                    currentVariableDebt
+                }
+            }
+        }
+        """
         
-        # Simulated - replace with real subgraph query
-        # This would query: 
-        # query Liquidations($block) {
-        #   users(where: {healthFactor_lt: "1"}) {
-        #     id, collateral, borrowBalance, healthFactor
-        #   }
-        # }
-        
-        # Simulate finding some opportunities
-        if random.random() < 0.1:  # 10% chance per scan
-            opportunities.append(LiquidationOpportunity(
-                borrower=self._random_address(),
-                protocol="AAVE_V3",
-                collateral_token="ETH",
-                debt_token="USDC",
-                debt_amount=random.uniform(10000, 100000),
-                collateral_amount=random.uniform(5000, 50000),
-                health_factor=random.uniform(0.8, 0.99),
-                max_reward=random.uniform(100, 1000),
-                estimated_gas=350000,
-                priority_score=random.uniform(0.5, 1.0),
-                timestamp=time.time()
-            ))
+        try:
+            data = await query_subgraph(
+                AAVE_V3_SUBGRAPH,
+                query,
+                {"healthFactor": str(self.health_threshold)}
+            )
+            
+            if data and "users" in data:
+                for user in data["users"]:
+                    try:
+                        hf = float(user.get("healthFactor", 0))
+                        if hf >= self.health_threshold or hf <= 0:
+                            continue
+                        
+                        debt_usd = float(user.get("totalDebtUSD", 0))
+                        collateral_usd = float(user.get("totalCollateralUSD", 0))
+                        
+                        if debt_usd < 100:
+                            continue
+                        
+                        reward = debt_usd * 0.05
+                        if reward < self.min_reward:
+                            continue
+                        
+                        collateral_token = "ETH"
+                        if user.get("reserves"):
+                            first_reserve = user["reserves"][0]
+                            collateral_token = first_reserve.get("underlyingAsset", {}).get("symbol", "ETH")
+                        
+                        liq = LiquidationOpportunity(
+                            borrower=user["id"],
+                            protocol="AAVE_V3",
+                            collateral_token=collateral_token,
+                            debt_token="USDC",
+                            debt_amount=debt_usd,
+                            collateral_amount=collateral_usd,
+                            health_factor=hf,
+                            max_reward=reward,
+                            estimated_gas=350000,
+                            priority_score=self._calculate_priority(hf, reward, debt_usd),
+                            timestamp=time.time()
+                        )
+                        opportunities.append(liq)
+                        
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                        
+        except Exception as e:
+            logger.debug(f"Aave subgraph query failed: {e}")
         
         return opportunities
     
     async def _scan_compound(self) -> List[LiquidationOpportunity]:
-        """Scan Compound for liquidations"""
+        """Scan Compound V3 for liquidations - REAL SUBGRAPH QUERY"""
         opportunities = []
         
-        # Similar to Aave - query compound subgraph
-        if random.random() < 0.08:
-            opportunities.append(LiquidationOpportunity(
-                borrower=self._random_address(),
-                protocol="COMPOUND",
-                collateral_token="ETH",
-                debt_token="USDC",
-                debt_amount=random.uniform(5000, 50000),
-                collateral_amount=random.uniform(3000, 30000),
-                health_factor=random.uniform(0.85, 0.99),
-                max_reward=random.uniform(50, 500),
-                estimated_gas=300000,
-                priority_score=random.uniform(0.5, 1.0),
-                timestamp=time.time()
-            ))
+        query = """
+        query GetUnhealthyPositions($healthFactor: BigDecimal!) {
+            accounts(
+                where: {healthFactor_lt: $healthFactor}
+                first: 50
+                orderBy: healthFactor
+                orderDirection: asc
+            ) {
+                id
+                healthFactor
+                totalCollateralUSD
+                totalDebtUSD
+                tokens {
+                    underlyingSymbol
+                    underlyingAddress
+                    borrowBalanceUSD
+                    collateralBalanceUSD
+                }
+            }
+        }
+        """
+        
+        try:
+            data = await query_subgraph(
+                COMPOUND_V3_SUBGRAPH,
+                query,
+                {"healthFactor": str(self.health_threshold)}
+            )
+            
+            if data and "accounts" in data:
+                for account in data["accounts"]:
+                    try:
+                        hf = float(account.get("healthFactor", 0))
+                        if hf >= self.health_threshold or hf <= 0:
+                            continue
+                        
+                        debt_usd = float(account.get("totalDebtUSD", 0))
+                        collateral_usd = float(account.get("totalCollateralUSD", 0))
+                        
+                        if debt_usd < 100:
+                            continue
+                        
+                        reward = debt_usd * 0.05
+                        if reward < self.min_reward:
+                            continue
+                        
+                        collateral_token = "ETH"
+                        if account.get("tokens"):
+                            collateral_token = account["tokens"][0].get("underlyingSymbol", "ETH")
+                        
+                        liq = LiquidationOpportunity(
+                            borrower=account["id"],
+                            protocol="COMPOUND_V3",
+                            collateral_token=collateral_token,
+                            debt_token="USDC",
+                            debt_amount=debt_usd,
+                            collateral_amount=collateral_usd,
+                            health_factor=hf,
+                            max_reward=reward,
+                            estimated_gas=300000,
+                            priority_score=self._calculate_priority(hf, reward, debt_usd),
+                            timestamp=time.time()
+                        )
+                        opportunities.append(liq)
+                        
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                        
+        except Exception as e:
+            logger.debug(f"Compound subgraph query failed: {e}")
         
         return opportunities
     
     async def _scan_aerodrome(self) -> List[LiquidationOpportunity]:
-        """Scan Aerodrome (Base) for liquidations"""
+        """Scan Aerodrome (Base) for liquidations - REAL SUBGRAPH"""
         opportunities = []
         
-        if random.random() < 0.05:
-            opportunities.append(LiquidationOpportunity(
-                borrower=self._random_address(),
-                protocol="AERODROME",
-                collateral_token="ETH",
-                debt_token="USDC",
-                debt_amount=random.uniform(5000, 30000),
-                collateral_amount=random.uniform(2000, 15000),
-                health_factor=random.uniform(0.9, 0.99),
-                max_reward=random.uniform(50, 300),
-                estimated_gas=250000,
-                priority_score=random.uniform(0.4, 0.9),
-                timestamp=time.time()
-            ))
+        query = """
+        query GetUnhealthyPositions($healthFactor: BigDecimal!) {
+            accounts(
+                where: {healthFactor_lt: $healthFactor}
+                first: 30
+                orderBy: healthFactor
+            ) {
+                id
+                healthFactor
+                totalCollateralUSD
+                totalDebtUSD
+            }
+        }
+        """
+        
+        try:
+            data = await query_subgraph(
+                AERODROME_SUBGRAPH,
+                query,
+                {"healthFactor": str(self.health_threshold)}
+            )
+            
+            if data and "accounts" in data:
+                for account in data["accounts"]:
+                    try:
+                        hf = float(account.get("healthFactor", 0))
+                        if hf >= self.health_threshold or hf <= 0:
+                            continue
+                        
+                        debt_usd = float(account.get("totalDebtUSD", 0))
+                        if debt_usd < 100:
+                            continue
+                        
+                        reward = debt_usd * 0.05
+                        if reward < self.min_reward:
+                            continue
+                        
+                        liq = LiquidationOpportunity(
+                            borrower=account["id"],
+                            protocol="AERODROME",
+                            collateral_token="ETH",
+                            debt_token="USDC",
+                            debt_amount=debt_usd,
+                            collateral_amount=float(account.get("totalCollateralUSD", 0)),
+                            health_factor=hf,
+                            max_reward=reward,
+                            estimated_gas=250000,
+                            priority_score=self._calculate_priority(hf, reward, debt_usd),
+                            timestamp=time.time()
+                        )
+                        opportunities.append(liq)
+                        
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                        
+        except Exception as e:
+            logger.debug(f"Aerodrome subgraph query failed: {e}")
         
         return opportunities
     
     async def _scan_radiant(self) -> List[LiquidationOpportunity]:
-        """Scan Radiant (Arbitrum) for liquidations"""
+        """Scan Radiant (Arbitrum) for liquidations - REAL SUBGRAPH"""
         opportunities = []
         
-        if random.random() < 0.07:
-            opportunities.append(LiquidationOpportunity(
-                borrower=self._random_address(),
-                protocol="RADIANT",
-                collateral_token="ETH",
-                debt_token="USDC",
-                debt_amount=random.uniform(8000, 60000),
-                collateral_amount=random.uniform(4000, 30000),
-                health_factor=random.uniform(0.85, 0.99),
-                max_reward=random.uniform(80, 600),
-                estimated_gas=320000,
-                priority_score=random.uniform(0.45, 0.95),
-                timestamp=time.time()
-            ))
+        query = """
+        query GetUnhealthyPositions($healthFactor: BigDecimal!) {
+            accounts(
+                where: {healthFactor_lt: $healthFactor}
+                first: 30
+                orderBy: healthFactor
+            ) {
+                id
+                healthFactor
+                totalCollateralUSD
+                totalDebtUSD
+            }
+        }
+        """
+        
+        try:
+            data = await query_subgraph(
+                RADIANT_SUBGRAPH,
+                query,
+                {"healthFactor": str(self.health_threshold)}
+            )
+            
+            if data and "accounts" in data:
+                for account in data["accounts"]:
+                    try:
+                        hf = float(account.get("healthFactor", 0))
+                        if hf >= self.health_threshold or hf <= 0:
+                            continue
+                        
+                        debt_usd = float(account.get("totalDebtUSD", 0))
+                        if debt_usd < 100:
+                            continue
+                        
+                        reward = debt_usd * 0.05
+                        if reward < self.min_reward:
+                            continue
+                        
+                        liq = LiquidationOpportunity(
+                            borrower=account["id"],
+                            protocol="RADIANT",
+                            collateral_token="ETH",
+                            debt_token="USDC",
+                            debt_amount=debt_usd,
+                            collateral_amount=float(account.get("totalCollateralUSD", 0)),
+                            health_factor=hf,
+                            max_reward=reward,
+                            estimated_gas=320000,
+                            priority_score=self._calculate_priority(hf, reward, debt_usd),
+                            timestamp=time.time()
+                        )
+                        opportunities.append(liq)
+                        
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                        
+        except Exception as e:
+            logger.debug(f"Radiant subgraph query failed: {e}")
         
         return opportunities
     
-    def _random_address(self) -> str:
-        """Generate random address"""
-        return "0x" + "".join(random.choices("0123456789abcdef", k=40))
+    def _calculate_priority(self, health_factor: float, reward: float, debt: float) -> float:
+        """Calculate priority score for liquidation (higher = better)"""
+        hf_score = (self.health_threshold - health_factor) / self.health_threshold
+        reward_score = min(reward / 1000, 1.0)
+        debt_score = min(debt / 50000, 1.0)
+        return (hf_score * 0.5) + (reward_score * 0.3) + (debt_score * 0.2)
+    
+    def _is_new_position(self, liq: LiquidationOpportunity) -> bool:
+        """Check if position is new/not processed"""
+        key = f"{liq.protocol}:{liq.borrower.lower()}"
+        return key not in self.processed_positions
     
     def _is_better_than_queued(self, liq: LiquidationOpportunity) -> bool:
         """Check if liquidation is better than current best"""
