@@ -278,7 +278,7 @@ class RealTimeProfitCalculator:
             pass
         
         # Default to 30 gwei if all else fails
-        return 30.0
+        return 0.0  # No fallback
     
     def _calculate_confidence(
         self,

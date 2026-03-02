@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from enum import Enum
 import time
 import json
-import random
 
 from src.utils.profit_verifier import ProfitGuard, OpportunityFilter, RealTimeProfitCalculator
 from src.utils.reliability_manager import ReliabilityManager, SystemHealth, RecoveryAction
@@ -189,7 +188,7 @@ class EnhancedTradingEngine:
                                 "exchange_out": exchange_out,
                                 "profit_percentage": profit_pct,
                                 "estimated_profit": amount * profit_pct,
-                                "confidence": 0.7 + random.random() * 0.3,
+                                "confidence": min(1.0, profit_pct * 10),  # Confidence based on profit percentage
                                 "timestamp": current_time
                             }
                             opportunities.append(opportunity)
