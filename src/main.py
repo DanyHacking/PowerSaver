@@ -37,6 +37,9 @@ class AutonomousTradingSystemManager:
         trading_config = self.config.get_trading_config()
         risk_config = self.config.get_risk_config()
         
+        # Get RPC URL
+        rpc_url = self.config.get_rpc_url() or "https://eth.llamarpc.com"
+        
         self.trading_engine = CompleteAutonomousTradingEngine({
             "loan_amount": trading_config["loan_amount"],
             "max_loan_amount": trading_config["max_loan_amount"],
@@ -45,7 +48,8 @@ class AutonomousTradingSystemManager:
             "min_profit_threshold": trading_config["min_profit_threshold"],
             "max_concurrent_trades": trading_config["max_concurrent_trades"],
             "tokens": trading_config["tokens"],
-            "exchanges": trading_config["exchanges"]
+            "exchanges": trading_config["exchanges"],
+            "rpc_url": rpc_url  # Add RPC URL
         })
         
         # Set trading strategy

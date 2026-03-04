@@ -4,7 +4,7 @@ Network Selector - Switch between mainnet and testnet
 
 import os
 import json
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from dataclasses import dataclass
 
 
@@ -14,6 +14,7 @@ class NetworkConfig:
     name: str
     chain_id: int
     rpc_url: str
+    fallback_rpc_urls: List[str]
     explorer: str
     tokens: list
     exchanges: list
@@ -53,11 +54,31 @@ class NetworkSelector:
             name=self.network,
             chain_id=network_data.get("chain_id", 1 if self.network == "mainnet" else 11155111),
             rpc_url=network_data.get("rpc_url", "http://localhost:8545"),
+            fallback_rpc_urls=network_data.get("fallback_rpc_urls", []),
             explorer=network_data.get("explorer", "https://etherscan.io"),
             tokens=network_data.get("tokens", []),
             exchanges=network_data.get("exchanges", []),
             contracts=network_data.get("contracts", {})
         )
+    
+    def get_rpc_url(self) -> str:
+        """Get the best available RPC URL with fallback support"""
+        from web3 import Web3
+        
+        config = self.get_config()
+        rpc_urls = [config.rpc_url] + config.fallback_rpc_urls
+        
+        for rpc_url in rpc_urls:
+            if not rpc_url:
+                continue
+            try:
+                w3 = Web3(Web3.HTTPProvider(rpc_url))
+                if w3.is_connected():
+                    return rpc_url
+            except:
+                continue
+        
+        return rpc_urls[0] if rpc_urls else "http://localhost:8545"
     
     def is_testnet(self) -> bool:
         """Check if running on testnet"""

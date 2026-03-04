@@ -4,7 +4,13 @@
     
     "mainnet": {
         "chain_id": 1,
-        "rpc_url": "http://localhost:8545",
+        "rpc_url": "https://eth.llamarpc.com",
+        "fallback_rpc_urls": [
+            "https://relay.flashbots.net",
+            "https://eth.llamarpc.com",
+            "https://ethereum-rpc.publicnode.com",
+            "https://1rpc.io/eth"
+        ],
         "explorer": "https://etherscan.io",
         
         "tokens": ["ETH", "WETH", "USDC", "USDT", "DAI", "WBTC", "LINK", "UNI", "AAVE", "CRV", "SUSHI", "SNX", "COMP", "MKR", "MATIC", "LDO", "OP", "ARB", "STETH", "RETH", "GMX", "RNDR"],

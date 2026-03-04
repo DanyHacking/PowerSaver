@@ -12,7 +12,7 @@ from web3 import Web3
 try:
     from web3.middleware import geth_poa_middleware
 except ImportError:
-    geth_middleware = None
+    geth_poa_middleware = None
 
 
 @pytest.fixture(scope="session")
@@ -25,7 +25,7 @@ def rpc_url():
 def w3(rpc_url):
     """Web3 instance for production"""
     w3 = Web3(Web3.HTTPProvider(rpc_url))
-    if geth_middleware:
+    if geth_poa_middleware:
         try:
             w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         except Exception:

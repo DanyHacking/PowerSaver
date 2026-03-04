@@ -9,7 +9,12 @@ import json
 from pathlib import Path
 from datetime import datetime
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+
+# Handle web3 middleware import based on version
+try:
+    from web3.middleware import geth_poa_middleware
+except ImportError:
+    geth_poa_middleware = None
 
 
 class TransactionVerifier:
@@ -19,7 +24,8 @@ class TransactionVerifier:
         self.rpc_url = rpc_url
         self.project_root = Path(project_root)
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
-        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        if geth_poa_middleware:
+            self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         self.results = {
             "timestamp": datetime.now().isoformat(),
             "verifications": [],

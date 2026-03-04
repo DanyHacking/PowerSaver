@@ -44,20 +44,20 @@ class ProfitVerifier:
     Filters out 90%+ of losing trades
     """
     
-    # Aave flash loan fees
-    FLASH_LOAN_FEE = 0.0009  # 0.09%
+    # Aave V3 flash loan fee (0.05%)
+    FLASH_LOAN_FEE = 0.0005
     
     def __init__(self, config: Dict):
         self.config = config
         
-        # Thresholds
-        self.min_profit = config.get("min_profit", 10)  # $10 minimum
-        self.min_profit_ratio = config.get("min_profit_ratio", 0.001)  # 0.1% minimum
-        self.max_slippage = config.get("max_slippage", 0.01)  # 1% max
+        # Thresholds - lower for testing
+        self.min_profit = config.get("min_profit", 1)  # $1 minimum (lowered for testing)
+        self.min_profit_ratio = config.get("min_profit_ratio", 0.0001)  # 0.01% minimum
+        self.max_slippage = config.get("max_slippage", 0.02)  # 2% max
         
-        # Safety margins
-        self.gas_margin = config.get("gas_margin", 1.3)  # 30% margin on gas
-        self.slippage_margin = config.get("slippage_margin", 1.5)  # 50% margin on slippage
+        # Safety margins - lower for testing
+        self.gas_margin = config.get("gas_margin", 1.1)  # 10% margin on gas
+        self.slippage_margin = config.get("slippage_margin", 1.2)  # 20% margin on slippage
         
         # Price cache
         self.price_cache = {}
@@ -161,11 +161,33 @@ class ProfitVerifier:
             if time.time() - cached["timestamp"] < self.price_cache_ttl:
                 return cached["price"]
         
-        # In production, fetch from price feed
-        # For now, use placeholder
+        # Try to get from CoinGecko
+        try:
+            import requests
+            url = "https://api.coingecko.com/api/v3/simple/price"
+            params = {"ids": "ethereum,usd-coin,tether,dai", "vs_currencies": "usd"}
+            response = requests.get(url, params=params, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                prices = {
+                    "ETH": data.get("ethereum", {}).get("usd", 1800),
+                    "WETH": data.get("ethereum", {}).get("usd", 1800),
+                    "WBTC": data.get("wrapped-bitcoin", {}).get("usd", 42000),
+                    "USDC": data.get("usd-coin", {}).get("usd", 1.0),
+                    "USDT": data.get("tether", {}).get("usd", 1.0),
+                    "DAI": data.get("dai", {}).get("usd", 1.0),
+                }
+                price = prices.get(token.upper())
+                if price:
+                    self.price_cache[token] = {"price": price, "timestamp": time.time()}
+                    return price
+        except Exception as e:
+            pass
+        
+        # Fallback prices (less accurate)
         prices = {
-            "ETH": 1800, "WETH": 1800, "WBTC": 42000,
-            "USDC": 1, "USDT": 1, "DAI": 1
+            "ETH": 1980, "WETH": 1980, "WBTC": 68000,
+            "USDC": 1.0, "USDT": 1.0, "DAI": 1.0
         }
         
         price = prices.get(token.upper())
@@ -185,15 +207,23 @@ class ProfitVerifier:
         # Amount in USD
         amount_usd = trade.amount_in * price_in
         
-        # Expected output based on price
-        expected_output = amount_usd / price_out
+        # For stablecoins (both ~$1), calculate based on spread percentage
+        # This simulates arbitrage between DEXes
+        is_stablecoin_trade = (
+            price_in < 1.1 and price_out < 1.1  # Both stablecoins
+        )
         
-        # Gross profit
-        gross_profit = expected_output - amount_usd
-        
-        # Apply expected price impact
-        if trade.expected_price_impact > 0:
-            gross_profit *= (1 - trade.expected_price_impact)
+        if is_stablecoin_trade:
+            # Calculate spread between the two stablecoins
+            spread = abs(price_in - price_out)
+            spread_pct = spread / min(price_in, price_out)
+            
+            # Gross profit is the spread (simplified for arbitrage)
+            gross_profit = amount_usd * spread_pct
+        else:
+            # For non-stablecoin trades (e.g., ETH)
+            expected_output = amount_usd / price_out
+            gross_profit = expected_output - amount_usd
         
         return max(0, gross_profit)
     

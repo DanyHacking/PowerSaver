@@ -8,7 +8,12 @@ import os
 import json
 from pathlib import Path
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+
+# Handle web3 middleware import based on version
+try:
+    from web3.middleware import geth_poa_middleware
+except ImportError:
+    geth_poa_middleware = None
 
 
 class TestProductionConfiguration:
